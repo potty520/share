@@ -1,0 +1,33 @@
+# 缓存与构建产物
+target/
+node_modules/
+dist/
+data/
+*.log
+
+# 误拷贝的工程副本（本地排查用，不纳入仓库）
+/share/
+
+# 本地 H2 数据库与 Playwright 临时文件
+*.mv.db
+*.trace.db
+.playwright-mcp/
+
+# 工具链（不纳入工程）
+../_toolchain/
+_toolchain/
+
+# IDE
+.idea/
+*.iml
+.vscode/
+
+# 前端本地文件
+share-web/.vite/
+package-lock.json
+pnpm-lock.yaml
+
+# 本地部署凭据（如使用）
+.env
+.env.*
+*.pem

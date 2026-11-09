@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+    <parent>
+        <groupId>com.share</groupId>
+        <artifactId>share-exchange</artifactId>
+        <version>1.0.0</version>
+    </parent>
+    <artifactId>share-catalog</artifactId>
+    <name>share-catalog</name>
+    <description>数据目录 + 数据源接入（FR-01 / FR-03）</description>
+
+    <dependencies>
+        <dependency>
+            <groupId>com.share</groupId>
+            <artifactId>share-common</artifactId>
+        </dependency>
+    </dependencies>
+</project>

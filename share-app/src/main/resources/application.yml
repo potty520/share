@@ -1,0 +1,100 @@
+server:
+  port: 8080
+  shutdown: graceful
+  tomcat:
+    max-swallow-size: -1
+
+spring:
+  application:
+    name: share-exchange
+  # 开发态使用内存 H2（每次启动自动建表+初始化演示数据，重启即重置，演示环境最稳）。
+  # 需要持久化时：--spring.profiles.active=file（文件库）或 mysql（生产 MySQL）。
+  datasource:
+    url: jdbc:h2:mem:share;MODE=MySQL;DATABASE_TO_LOWER=TRUE;CASE_INSENSITIVE_IDENTIFIERS=TRUE;DB_CLOSE_DELAY=-1
+    driver-class-name: org.h2.Driver
+    username: sa
+    password: ""
+    hikari:
+      maximum-pool-size: 20
+      minimum-idle: 4
+  jpa:
+    hibernate:
+      ddl-auto: update
+    open-in-view: false
+    properties:
+      hibernate:
+        jdbc:
+          time_zone: Asia/Shanghai
+        format_sql: false
+  h2:
+    console:
+      enabled: true
+      path: /h2-console
+  jackson:
+    time-zone: Asia/Shanghai
+    default-property-inclusion: always
+  servlet:
+    multipart:
+      max-file-size: 200MB
+      max-request-size: 220MB
+  web:
+    resources:
+      static-locations: classpath:/static/
+
+# ===== 平台自身配置 =====
+share:
+  jwt:
+    # 生产环境必须通过环境变量 SHARE_JWT_SECRET 覆盖
+    secret: ${SHARE_JWT_SECRET:share-exchange-platform-default-secret-key-2026-change-it-32bytes}
+    access-minutes: 15
+    refresh-days: 7
+  crypto:
+    key: ${SHARE_CRYPTO_KEY:share-exchange-local-crypto-key-change-me}
+    # 数据源口令等敏感配置加密存储
+  file:
+    root: ./data/files
+    chunk-size: 1048576
+    max-size-mb: 200
+  engine:
+    batch-size: 500
+    max-rows-per-run: 200000
+    retry-times: 3
+    retry-interval-seconds: 10
+  security:
+    password-min-length: 8
+    # 敏感数据默认密级（4 级最高）
+    sensitive-level: 3
+  monitor:
+    heartbeat-timeout-seconds: 90
+    audit-retention-days: 180
+  seed:
+    enabled: true
+
+logging:
+  level:
+    root: INFO
+    com.share: INFO
+    org.hibernate.SQL: WARN
+    org.springframework.web: INFO
+  file:
+    name: ./data/logs/share-exchange.log
+  logback:
+    rollingpolicy:
+      max-history: 30
+
+springdoc:
+  api-docs:
+    path: /v3/api-docs
+  swagger-ui:
+    path: /swagger-ui.html
+    tags-sorter: alpha
+    operations-sorter: alpha
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+  endpoint:
+    health:
+      show-details: always

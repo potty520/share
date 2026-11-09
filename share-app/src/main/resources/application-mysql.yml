@@ -1,0 +1,41 @@
+server:
+  port: 8080
+
+spring:
+  datasource:
+    url: jdbc:mysql://${MYSQL_HOST:127.0.0.1}:${MYSQL_PORT:3306}/${MYSQL_DB:share_exchange}?useUnicode=true&characterEncoding=utf8&useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    username: ${MYSQL_USER:share}
+    password: ${MYSQL_PASSWORD}
+    hikari:
+      maximum-pool-size: 40
+      minimum-idle: 8
+  jpa:
+    hibernate:
+      ddl-auto: update
+    open-in-view: false
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.MySQLDialect
+        jdbc:
+          time_zone: Asia/Shanghai
+  h2:
+    console:
+      enabled: false
+
+share:
+  jwt:
+    secret: ${SHARE_JWT_SECRET:please-change-this-production-secret-at-least-32-bytes}
+  crypto:
+    key: ${SHARE_CRYPTO_KEY:please-change-this-production-crypto-key}
+  file:
+    root: ${SHARE_FILE_ROOT:/data/share/files}
+  seed:
+    enabled: ${SHARE_SEED_ENABLED:false}
+
+logging:
+  level:
+    root: INFO
+    com.share: INFO
+  file:
+    name: /data/share/logs/share-exchange.log

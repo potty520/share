@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+    <parent>
+        <groupId>com.share</groupId>
+        <artifactId>share-exchange</artifactId>
+        <version>1.0.0</version>
+    </parent>
+    <artifactId>share-ops</artifactId>
+    <name>share-ops</name>
+    <description>文件交换 + 审计 + 监控告警 + 通知（FR-09/11/12/14）</description>
+
+    <dependencies>
+        <dependency>
+            <groupId>com.share</groupId>
+            <artifactId>share-common</artifactId>
+        </dependency>
+    </dependencies>
+</project>
