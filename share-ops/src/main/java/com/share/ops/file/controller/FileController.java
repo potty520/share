@@ -102,9 +102,8 @@ public class FileController {
     @AuditLog(action = "FILE_DOWNLOAD", targetType = "FILE", recordArgs = false)
     public ResponseEntity<StreamingResponseBody> download(@PathVariable Long id) {
         FlFile file = fileService.findForDownload(id);
-        Path path = fileService.pathOf(file);
         StreamingResponseBody body = outputStream -> {
-            try (InputStream in = Files.newInputStream(path)) {
+            try (InputStream in = fileService.openStream(file)) {
                 in.transferTo(outputStream);
             }
         };

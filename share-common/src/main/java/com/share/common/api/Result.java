@@ -70,6 +70,7 @@ public class Result<T> {
         private int pageSize;
         private long total;
         private long pages;
+        private String backend;
 
         public PageMeta() {
         }

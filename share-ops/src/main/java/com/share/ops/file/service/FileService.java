@@ -43,6 +43,7 @@ public class FileService {
     private final FlTransferLogRepository transferLogRepository;
     private final FlTransferTaskRepository transferTaskRepository;
     private final FileStorageService storage;
+    private final MinioStorageService minioStorage;
 
     // ================= 上传与落盘 =================
 
@@ -86,6 +87,14 @@ public class FileService {
         entity.setChunkCount(chunkCount);
         entity.setBizType(bizType == null ? OpsConstants.FILE_BIZ_UPLOAD : bizType);
         entity.setRemark(remark);
+        String objectKey = "files/" + entity.getFilePath().replace('\\', '/');
+        String uploadedKey = minioStorage.upload(target, objectKey);
+        if (uploadedKey != null) {
+            entity.setStorageType("MINIO");
+            entity.setObjectKey(uploadedKey);
+        } else {
+            entity.setStorageType("LOCAL");
+        }
         return fileRepository.save(entity);
     }
 
@@ -154,10 +163,27 @@ public class FileService {
     public FlFile findForDownload(Long id) {
         FlFile f = find(id);
         Path p = storage.resolve(f.getFilePath());
-        if (!storage.exists(p)) {
+        if (!storage.exists(p) && minioStorage.open(f.getObjectKey()) == null) {
             throw new BizException(ErrorCode.FILE_NOT_FOUND, "磁盘文件已丢失");
         }
         return f;
+    }
+
+    /** 打开文件流：本地优先，缺失时从 MinIO 回读。 */
+    public java.io.InputStream openStream(FlFile f) {
+        Path p = storage.resolve(f.getFilePath());
+        try {
+            if (Files.exists(p)) {
+                return Files.newInputStream(p);
+            }
+            java.io.InputStream remote = minioStorage.open(f.getObjectKey());
+            if (remote != null) {
+                return remote;
+            }
+        } catch (java.io.IOException e) {
+            throw new BizException(ErrorCode.FILE_NOT_FOUND, "读取文件失败: " + e.getMessage());
+        }
+        throw new BizException(ErrorCode.FILE_NOT_FOUND, "磁盘与对象存储均未找到文件");
     }
 
     public Path pathOf(FlFile f) {
@@ -171,6 +197,9 @@ public class FileService {
     public void delete(Long id) {
         FlFile f = find(id);
         storage.deleteQuietly(storage.resolve(f.getFilePath()));
+        if (minioStorage.available()) {
+            minioStorage.delete(f.getObjectKey());
+        }
         f.setDeleted(true);
         fileRepository.save(f);
         log.info("文件已删除 id={} name={}", id, f.getFileName());
@@ -259,6 +288,7 @@ public class FileService {
         stats.put("recentTransfers", PageSupport.mapList(
                 transferLogRepository.findTop20ByDeletedFalseOrderByStartTimeDesc(), this::toLogView));
         stats.put("chunkSize", storage.chunkSize());
+        stats.put("objectStorage", minioStorage.status());
         return stats;
     }
 
@@ -300,6 +330,8 @@ public class FileService {
         m.put("status", f.getStatus());
         m.put("secretLevel", f.getSecretLevel());
         m.put("bizType", f.getBizType());
+        m.put("storageType", f.getStorageType());
+        m.put("objectKey", f.getObjectKey());
         m.put("remark", f.getRemark());
         m.put("createTime", f.getCreateTime());
         m.put("downloadUrl", "/api/file/v1/files/" + f.getId() + "/download");

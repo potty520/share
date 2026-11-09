@@ -47,6 +47,9 @@ public class ScheduleService {
 
     private final ThreadPoolTaskScheduler scheduler;
 
+    @org.springframework.beans.factory.annotation.Value("${share.scheduler.enabled:true}")
+    private boolean schedulerEnabled;
+
     /** 上次扫描时间：只触发 (lastScan, now] 区间内的 cron 时点，避免重复触发。 */
     private volatile LocalDateTime lastScan = LocalDateTime.now();
 
@@ -67,6 +70,10 @@ public class ScheduleService {
     /** 启动 cron 扫描线程。 */
     @PostConstruct
     public void startScanner() {
+        if (!schedulerEnabled) {
+            log.info("交换任务调度扫描器已禁用（share.scheduler.enabled=false）");
+            return;
+        }
         scheduler.scheduleAtFixedRate(this::scanSafely, Duration.ofSeconds(60));
         log.info("交换任务调度扫描器已启动（60 秒周期，CronExpression 解析）");
     }

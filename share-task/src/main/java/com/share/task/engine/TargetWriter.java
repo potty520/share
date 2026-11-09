@@ -25,7 +25,7 @@ import java.util.Set;
 import java.util.function.LongConsumer;
 
 /**
- * 目标端写入器（FR-02）：支持 H2 目标表（自动建表 + 幂等 upsert）与 CSV 文件落盘。
+ * 目标端写入器（FR-02）：支持平台内置表（自动建表 + 幂等 upsert）、外部 JDBC 表与 CSV 文件落盘。
  * <p>幂等策略：目标表附加 sw_batch_id / sw_row_no 两列，写入前先删除同批次数据再批量插入；
  * 同一批次重复执行不会产生重复数据，可安全重试。</p>
  */
@@ -43,6 +43,8 @@ public class TargetWriter {
     private final JdbcTemplate jdbcTemplate;
 
     private final EngineSettings settings;
+
+    private final ExternalJdbcTableWriter externalJdbcTableWriter;
 
     /** 写入结果。 */
     @Getter
@@ -74,6 +76,9 @@ public class TargetWriter {
         if ("CSV_FILE".equals(targetType)) {
             return writeCsv(task, columns, rows, progress);
         }
+        if ("JDBC_TABLE".equals(targetType)) {
+            return externalJdbcTableWriter.write(task, columns, rows, batchId, progress);
+        }
         return writeTable(task, columns, rows, batchId, progress);
     }
 
@@ -85,22 +90,27 @@ public class TargetWriter {
             throw new BizException(ErrorCode.TASK_ENGINE_FAILED, "目标表名为空，无法执行库表同步");
         }
         SourceReader.validateIdentifier(table, "目标表名");
-        for (String column : columns) {
+        List<String> dataColumns = businessColumns(columns);
+        for (String column : dataColumns) {
             SourceReader.validateIdentifier(column, "目标列名");
         }
         WriteResult result = new WriteResult();
         result.setTargetRef(table);
 
-        ensureTable(table, columns, rows);
+        ensureTable(table, dataColumns, rows);
 
-        // 幂等：同一批次号的历史数据先删除，重复执行不产生重复记录
-        jdbcTemplate.update("delete from " + table + " where " + BATCH_COLUMN + " = ?", batchId);
+        // 全量任务覆盖目标快照；增量任务只清理同批次，重试仍保持幂等
+        if ("FULL".equalsIgnoreCase(task.getTaskType())) {
+            jdbcTemplate.update("delete from " + table);
+        } else {
+            jdbcTemplate.update("delete from " + table + " where " + BATCH_COLUMN + " = ?", batchId);
+        }
 
         if (rows.isEmpty()) {
             result.setWrittenRows(0);
             return result;
         }
-        List<String> insertColumns = new ArrayList<>(columns);
+        List<String> insertColumns = new ArrayList<>(dataColumns);
         insertColumns.add(BATCH_COLUMN);
         insertColumns.add(ROW_COLUMN);
         StringBuilder sql = new StringBuilder("insert into ").append(table).append(" (");
@@ -124,11 +134,11 @@ public class TargetWriter {
             for (int i = index; i < end; i++) {
                 Map<String, Object> row = rows.get(i);
                 Object[] values = new Object[insertColumns.size()];
-                for (int c = 0; c < columns.size(); c++) {
-                    values[c] = toJdbcValue(row.get(columns.get(c)));
+                for (int c = 0; c < dataColumns.size(); c++) {
+                    values[c] = toJdbcValue(row.get(dataColumns.get(c)));
                 }
-                values[columns.size()] = batchId;
-                values[columns.size() + 1] = (long) i + 1;
+                values[dataColumns.size()] = batchId;
+                values[dataColumns.size() + 1] = (long) i + 1;
                 args.add(values);
             }
             jdbcTemplate.batchUpdate(sql.toString(), args);
@@ -139,8 +149,19 @@ public class TargetWriter {
             }
         }
         result.setWrittenRows(written);
-        result.setBytes(RowChecksum.bytesOf(columns, rows));
+        result.setBytes(RowChecksum.bytesOf(dataColumns, rows));
         return result;
+    }
+
+    /** 去掉引擎保留列，避免源表再次同步时重复建列/重复插入。 */
+    private List<String> businessColumns(List<String> columns) {
+        List<String> dataColumns = new ArrayList<>();
+        for (String column : columns) {
+            if (!BATCH_COLUMN.equalsIgnoreCase(column) && !ROW_COLUMN.equalsIgnoreCase(column)) {
+                dataColumns.add(column);
+            }
+        }
+        return dataColumns;
     }
 
     /** 写入 CSV：覆盖目标文件（等价于删除旧批次后重新落盘）。 */
@@ -253,6 +274,13 @@ public class TargetWriter {
             Object value = row.get(column);
             if (value == null) {
                 continue;
+            }
+            if (value instanceof LocalDateTime || value instanceof Timestamp
+                    || value instanceof java.time.OffsetDateTime) {
+                return "datetime";
+            }
+            if (value instanceof LocalDate || value instanceof java.sql.Date) {
+                return "date";
             }
             String text = String.valueOf(value);
             if (text.isBlank()) {

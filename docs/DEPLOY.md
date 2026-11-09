@@ -177,3 +177,64 @@ server {
 - [ ] 监控大屏：节点在线状态、任务成功率、API 调用量、告警记录
 - [ ] 消息中心：审批待办/结果通知可读
 - [ ] `node scripts\smoke-test.mjs` 全部 PASS（允许 SKIP 项有说明）
+
+## 10. 中间件与可观测性（VM 实测）
+
+演示环境（192.168.43.128，Rocky Linux）已按生产形态拉起下列组件，均以 `--network host` 或 systemd 常驻：
+
+| 组件 | 端口 | 部署方式 | 关键配置 |
+| --- | --- | --- | --- |
+| Redis 7 | 6379 | `podman run --name share-redis` | 会话 `share:session:*`、网关/集群限流计数 |
+| Kafka 3.7（KRaft） | 9092 / 9093 | `podman run --name share-kafka` | topic：`share.audit`、`share.exchange`、`share.notify`（各 3 分区） |
+| MinIO（AGPL 社区版） | 9000 / 9001 | `podman run --name share-minio`（bitnamilegacy 镜像） | bucket `share-files`，账号 `shareadmin` |
+| Elasticsearch 8.13 | 9200 | `podman run --name share-es` | 单节点、关闭安全、512m 堆；索引 `share-audit` |
+| Loki 2.9 | 3100 | `podman run --name share-loki` | 文件存储 + TSDB，保留 7 天 |
+| APISIX 3.9 | 9080（数据面）/ 9180（Admin）/ 9091（指标） | `podman run --name share-apisix` | etcd 配置中心，Admin Key `share-apisix-admin-key` |
+| etcd 3.5 | 2379 | `podman run --name share-etcd` | APISIX 路由存储 |
+| SkyWalking OAP 9.7 | 11800（gRPC）/ 12800（GraphQL） | `podman run --name share-skywalking` | ES 存储，namespace `share-sw`；PromQL/LogQL 端口改为 9099/3101 避让 |
+| MySQL 从库 | 3307 | systemd `share-mysql-replica` | 主库 3306 → 从库复制，`read_only=ON`，只读事务走从库 |
+| Prometheus | 9090 | 独立进程（已有） | 抓取 `/actuator/prometheus` |
+
+### 10.1 应用侧开关
+
+`/etc/sysconfig/share-exchange`（center）与 `share-exchange-worker`（worker）均需：
+
+```bash
+SHARE_REDIS_ENABLED=true
+SHARE_KAFKA_ENABLED=true
+SHARE_MINIO_ENABLED=true
+SHARE_ES_ENABLED=true
+SHARE_APISIX_ENABLED=true
+SHARE_APISIX_JWT_CONSUMER=share_platform   # APISIX 用户名仅允许 [A-Za-z0-9_]
+MYSQL_REPLICA_ENABLED=true
+MYSQL_REPLICA_URL=jdbc:mysql://127.0.0.1:3307/share_exchange?useSSL=false&serverTimezone=Asia/Shanghai
+LOKI_URL=http://127.0.0.1:3100/loki/api/v1/push
+```
+
+启动参数追加 `--spring.profiles.active=mysql,loki`，并挂载 SkyWalking Agent：
+`-javaagent:/opt/skywalking-agent/skywalking-agent.jar -Dskywalking.collector.backend_service=127.0.0.1:11800`。
+
+### 10.2 验证命令
+
+```bash
+# Redis 会话
+curl -H "Authorization: Bearer $T" http://127.0.0.1:8080/api/auth/v1/sessions/status   # backend=REDIS
+# ES 审计检索
+curl -H "Authorization: Bearer $T" "http://127.0.0.1:8080/api/audit/v1/logs?pageNum=1&pageSize=5"  # page.backend=ELASTICSEARCH
+# APISIX 路由
+curl -H "Authorization: Bearer $T" http://127.0.0.1:8080/api/share/v1/gateway/apisix/status
+curl -X POST -H "Authorization: Bearer $T" http://127.0.0.1:8080/api/share/v1/gateway/apisix/sync
+# 经 APISIX 数据面调用（需 JWT + X-App-Key/X-App-Secret）
+curl http://127.0.0.1:9080/api/open/v1/ENTERPRISE_BASE_INFO -H "Authorization: Bearer $T" \
+     -H "X-App-Key: $AK" -H "X-App-Secret: $SK"
+# 对象存储
+curl -H "Authorization: Bearer $T" http://127.0.0.1:8080/api/file/v1/stats   # objectStorage.available=true
+# 指标
+curl -s http://127.0.0.1:8080/actuator/prometheus | grep -E "^share_"
+# 日志（batchId）
+curl -sG http://127.0.0.1:3100/loki/api/v1/query_range --data-urlencode 'query={app="share-exchange"} |= "batchId=SW"'
+```
+
+实测结果：冒烟测试 `PASS=39 FAIL=0`，网关增强测试 `PASS=11 FAIL=0`；文件上传落 `storageType=MINIO`，
+删除本地文件后仍可下载；Kafka 三个 topic 均有消息且消费端回写审计；SkyWalking 已注册
+`share-exchange-center` 与 `share-exchange-worker`，批次链路带 `batchId` 标签。

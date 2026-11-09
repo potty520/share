@@ -5,6 +5,7 @@ import com.share.ops.audit.entity.AudOperationLog;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.event.EventListener;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
 /**
@@ -14,6 +15,7 @@ import org.springframework.stereotype.Component;
 @Slf4j
 @Component
 @RequiredArgsConstructor
+@ConditionalOnProperty(name = "share.kafka.enabled", havingValue = "false", matchIfMissing = true)
 public class AuditEventRecorder {
 
     private final AuditService auditService;

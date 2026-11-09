@@ -62,6 +62,7 @@
 
       <!-- 报告 -->
       <el-tab-pane label="检核报告" name="reports">
+        <div v-show="reports.length" ref="trendChartRef" style="height: 220px; margin-bottom: 12px"></div>
         <el-table :data="reports" stripe border size="small" empty-text="暂无检核报告，请先执行规则检核">
           <el-table-column label="报告编号" width="100">
             <template #default="{ row }">{{ pick(row, ['id'], '-') }}</template>
@@ -70,7 +71,7 @@
             <template #default="{ row }">{{ pick(row, ['ruleName'], '-') }}</template>
           </el-table-column>
           <el-table-column label="检核对象" min-width="150" show-overflow-tooltip>
-            <template #default="{ row }">{{ pick(row, ['targetTable'], '-') }}{{ row.targetField ? '.' + row.targetField : '' }}</template>
+            <template #default="{ row }">{{ objectText(row) }}</template>
           </el-table-column>
           <el-table-column label="得分" width="90" align="center">
             <template #default="{ row }">
@@ -119,7 +120,7 @@
             <template #default="{ row }">{{ pick(row, ['ruleName', 'ruleCode'], '-') }}</template>
           </el-table-column>
           <el-table-column label="检核对象" min-width="150" show-overflow-tooltip>
-            <template #default="{ row }">{{ pick(row, ['targetTable'], '-') }}{{ row.targetField ? '.' + row.targetField : '' }}</template>
+            <template #default="{ row }">{{ objectText(row) }}</template>
           </el-table-column>
           <el-table-column label="级别" width="90">
             <template #default="{ row }">
@@ -175,6 +176,13 @@
                 <el-option label="规范性" value="FORMAT" />
                 <el-option label="一致性" value="CONSISTENCY" />
                 <el-option label="及时性" value="TIMELINESS" />
+              </el-select>
+            </el-form-item>
+          </el-col>
+          <el-col :span="12">
+            <el-form-item label="目标数据源">
+              <el-select v-model="ruleForm.targetId" clearable filterable placeholder="留空检核平台内置库" style="width: 100%">
+                <el-option v-for="s in sources" :key="s.id" :label="s.name" :value="s.id" />
               </el-select>
             </el-form-item>
           </el-col>
@@ -265,7 +273,8 @@
 </template>
 
 <script setup>
-import { onMounted, reactive, ref } from 'vue'
+import { onMounted, onUnmounted, reactive, ref } from 'vue'
+import * as echarts from 'echarts'
 import { ElMessage } from 'element-plus'
 import { Plus, Refresh } from '@element-plus/icons-vue'
 import request from '@/api/request'
@@ -274,10 +283,13 @@ import { confirmBox, fmtDateTime, fmtNumber, listOf, pick, tagType } from '@/api
 const loading = ref(false)
 const tab = ref('rules')
 const rules = ref([])
+const sources = ref([])
 const reports = ref([])
 const reportPage = ref(1)
 const reportSize = 10
 const reportTotal = ref(0)
+const trendChartRef = ref()
+let trendChart
 const issues = ref([])
 const issuePage = ref(1)
 const issueSize = 10
@@ -318,6 +330,7 @@ function emptyRule() {
     ruleName: '',
     ruleCode: '',
     ruleType: 'COMPLETENESS',
+    targetId: null,
     targetTable: '',
     targetField: '',
     expression: '',
@@ -337,10 +350,11 @@ function ruleTypeText(v) {
 }
 
 function objectText(row) {
+  const targetId = row && row.targetId ? `ds#${row.targetId} · ` : ''
   const table = pick(row, ['targetTable'], '')
   const field = pick(row, ['targetField'], '')
-  if (table && field) return `${table}.${field}`
-  return table || '-'
+  if (table && field) return `${targetId}${table}.${field}`
+  return table ? `${targetId}${table}` : '-'
 }
 
 function scoreTag(score) {
@@ -387,6 +401,7 @@ async function loadReports() {
     const res = await request.get('/quality/v1/reports', { params: { pageNum: reportPage.value, pageSize: reportSize } })
     reports.value = listOf(res.data)
     reportTotal.value = res.page?.total ?? reports.value.length
+    renderTrend()
   } catch (e) {
     reports.value = []
     reportTotal.value = 0
@@ -426,6 +441,7 @@ function openEditRule(row) {
   ruleForm.ruleName = ruleName(row)
   ruleForm.ruleCode = pick(row, ['ruleCode'], '')
   ruleForm.ruleType = pick(row, ['ruleType'], 'COMPLETENESS')
+  ruleForm.targetId = row.targetId || null
   ruleForm.targetTable = pick(row, ['targetTable'], '')
   ruleForm.targetField = pick(row, ['targetField'], '')
   ruleForm.expression = pick(row, ['expression'], '')
@@ -449,6 +465,7 @@ async function saveRule() {
       ruleCode: ruleForm.ruleCode,
       ruleName: ruleForm.ruleName,
       ruleType: ruleForm.ruleType,
+      targetId: ruleForm.targetId || undefined,
       targetTable: ruleForm.targetTable,
       targetField: ruleForm.targetField || undefined,
       expression: ruleForm.expression || undefined,
@@ -550,8 +567,42 @@ async function closeIssue(row) {
 }
 
 onMounted(() => {
+  loadSources()
   loadRules()
   loadReports()
   loadIssues()
+  window.addEventListener('resize', resizeTrend)
 })
+
+onUnmounted(() => {
+  window.removeEventListener('resize', resizeTrend)
+  trendChart?.dispose()
+})
+
+function renderTrend() {
+  if (!trendChartRef.value || !reports.value.length) return
+  if (!trendChart) trendChart = echarts.init(trendChartRef.value)
+  const rows = [...reports.value].reverse()
+  trendChart.setOption({
+    tooltip: { trigger: 'axis' },
+    grid: { left: 44, right: 20, top: 24, bottom: 28 },
+    xAxis: { type: 'category', data: rows.map((r) => fmtDateTime(r.checkTime || r.createTime)) },
+    yAxis: { type: 'value', min: 0, max: 100 },
+    series: [{ name: '质量得分', type: 'line', smooth: true, data: rows.map((r) => Number(r.score ?? 0)), areaStyle: { opacity: 0.12 } }]
+  })
+  trendChart.resize()
+}
+
+function resizeTrend() {
+  trendChart?.resize()
+}
+
+async function loadSources() {
+  try {
+    const res = await request.get('/datasource/v1/sources', { params: { pageNum: 1, pageSize: 200 } })
+    sources.value = listOf(res.data).map((s) => ({ id: s.id, name: pick(s, ['sourceName', 'name'], `数据源 #${s.id}`) }))
+  } catch (e) {
+    sources.value = []
+  }
+}
 </script>

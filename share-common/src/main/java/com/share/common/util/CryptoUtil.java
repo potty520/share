@@ -4,6 +4,11 @@ import javax.crypto.Cipher;
 import javax.crypto.spec.GCMParameterSpec;
 import javax.crypto.spec.SecretKeySpec;
 import java.nio.charset.StandardCharsets;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
+import javax.crypto.CipherInputStream;
+import javax.crypto.CipherOutputStream;
 import java.security.MessageDigest;
 import java.security.SecureRandom;
 import java.util.Base64;
@@ -68,6 +73,63 @@ public final class CryptoUtil {
             return new String(cipher.doFinal(all, GCM_IV_LEN, all.length - GCM_IV_LEN), StandardCharsets.UTF_8);
         } catch (Exception e) {
             throw new IllegalStateException("解密失败", e);
+        }
+    }
+
+    /** 字节数组 AES-GCM 加密，输出 iv + ciphertext（用于文件加密传输）。 */
+    public static byte[] encryptBytes(byte[] plain, SecretKeySpec key) {
+        try {
+            byte[] iv = new byte[GCM_IV_LEN];
+            RANDOM.nextBytes(iv);
+            Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
+            cipher.init(Cipher.ENCRYPT_MODE, key, new GCMParameterSpec(GCM_TAG_BITS, iv));
+            byte[] cipherText = cipher.doFinal(plain);
+            byte[] out = new byte[iv.length + cipherText.length];
+            System.arraycopy(iv, 0, out, 0, iv.length);
+            System.arraycopy(cipherText, 0, out, iv.length, cipherText.length);
+            return out;
+        } catch (Exception e) {
+            throw new IllegalStateException("文件加密失败", e);
+        }
+    }
+
+    /** 字节数组 AES-GCM 解密，输入 iv + ciphertext。 */
+    public static byte[] decryptBytes(byte[] encrypted, SecretKeySpec key) {
+        try {
+            Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
+            cipher.init(Cipher.DECRYPT_MODE, key, new GCMParameterSpec(GCM_TAG_BITS, encrypted, 0, GCM_IV_LEN));
+            return cipher.doFinal(encrypted, GCM_IV_LEN, encrypted.length - GCM_IV_LEN);
+        } catch (Exception e) {
+            throw new IllegalStateException("文件解密失败", e);
+        }
+    }
+
+    /** 流式加密输出：先写 12 字节 IV，再输出 AES-GCM 密文。 */
+    public static OutputStream encryptingStream(OutputStream out, SecretKeySpec key) throws IOException {
+        byte[] iv = new byte[GCM_IV_LEN];
+        RANDOM.nextBytes(iv);
+        out.write(iv);
+        try {
+            Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
+            cipher.init(Cipher.ENCRYPT_MODE, key, new GCMParameterSpec(GCM_TAG_BITS, iv));
+            return new CipherOutputStream(out, cipher);
+        } catch (Exception e) {
+            throw new IOException("初始化加密流失败", e);
+        }
+    }
+
+    /** 流式解密输入：读取 12 字节 IV 后输出明文字节。 */
+    public static InputStream decryptingStream(InputStream in, SecretKeySpec key) throws IOException {
+        byte[] iv = in.readNBytes(GCM_IV_LEN);
+        if (iv.length != GCM_IV_LEN) {
+            throw new IOException("密文头部不完整");
+        }
+        try {
+            Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
+            cipher.init(Cipher.DECRYPT_MODE, key, new GCMParameterSpec(GCM_TAG_BITS, iv));
+            return new CipherInputStream(in, cipher);
+        } catch (Exception e) {
+            throw new IOException("初始化解密流失败", e);
         }
     }
 

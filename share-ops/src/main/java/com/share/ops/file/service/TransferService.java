@@ -3,6 +3,7 @@ package com.share.ops.file.service;
 import com.share.common.api.ErrorCode;
 import com.share.common.exception.BizException;
 import com.share.common.security.UserContext;
+import com.share.common.util.CryptoUtil;
 import com.share.common.util.IdGen;
 import com.share.ops.file.entity.FlTransferLog;
 import com.share.ops.file.entity.FlTransferTask;
@@ -13,6 +14,7 @@ import com.share.ops.support.PageSupport;
 import jakarta.persistence.criteria.Predicate;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
@@ -23,6 +25,7 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
 import java.io.IOException;
+import java.io.OutputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -32,6 +35,10 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
+import java.util.Locale;
+import java.util.zip.GZIPOutputStream;
+import javax.crypto.spec.SecretKeySpec;
 
 /**
  * 文件收发任务服务（FR-09）：任务 CRUD、立即执行（真实复制文件 + 传输日志）、cron 调度与目录监听扫描。
@@ -44,6 +51,12 @@ public class TransferService {
     private final FlTransferTaskRepository taskRepository;
     private final FlTransferLogRepository logRepository;
     private final FileStorageService storage;
+    private final RemoteFileService remoteFileService;
+
+    @Value("${share.crypto.key:share-exchange-local-crypto-key-change-me}")
+    private String cryptoKey;
+
+    private volatile SecretKeySpec secretKey;
 
     // ================= 任务 CRUD =================
 
@@ -109,6 +122,8 @@ public class TransferService {
         if (!StringUtils.hasText(req.getTargetType())) {
             req.setTargetType("LOCAL");
         }
+        req.setSourcePassword(encryptPassword(req.getSourcePassword()));
+        req.setTargetPassword(encryptPassword(req.getTargetPassword()));
         FlTransferTask saved = taskRepository.save(req);
         return toView(saved);
     }
@@ -146,6 +161,42 @@ public class TransferService {
         }
         if (req.getRemark() != null) {
             task.setRemark(req.getRemark());
+        }
+        if (req.getSourceHost() != null) {
+            task.setSourceHost(req.getSourceHost());
+        }
+        if (req.getSourcePort() != null) {
+            task.setSourcePort(req.getSourcePort());
+        }
+        if (req.getSourceUsername() != null) {
+            task.setSourceUsername(req.getSourceUsername());
+        }
+        if (StringUtils.hasText(req.getSourcePassword())) {
+            task.setSourcePassword(encryptPassword(req.getSourcePassword()));
+        }
+        if (req.getTargetHost() != null) {
+            task.setTargetHost(req.getTargetHost());
+        }
+        if (req.getTargetPort() != null) {
+            task.setTargetPort(req.getTargetPort());
+        }
+        if (req.getTargetUsername() != null) {
+            task.setTargetUsername(req.getTargetUsername());
+        }
+        if (StringUtils.hasText(req.getTargetPassword())) {
+            task.setTargetPassword(encryptPassword(req.getTargetPassword()));
+        }
+        if (req.getCompress() != null) {
+            task.setCompress(req.getCompress().toUpperCase(Locale.ROOT));
+        }
+        if (req.getEncryptFlag() != null) {
+            task.setEncryptFlag(req.getEncryptFlag());
+        }
+        if (req.getRetryTimes() != null) {
+            task.setRetryTimes(req.getRetryTimes());
+        }
+        if (req.getRetryIntervalSeconds() != null) {
+            task.setRetryIntervalSeconds(req.getRetryIntervalSeconds());
         }
         if (req.getDeptId() != null) {
             task.setDeptId(req.getDeptId());
@@ -263,39 +314,281 @@ public class TransferService {
         transferLog.setStartTime(start);
         String source = StringUtils.hasText(overrideSource) ? overrideSource : task.getSourcePath();
         transferLog.setSourceFile(source);
-        try {
-            if (!StringUtils.hasText(source)) {
-                throw new BizException(ErrorCode.BAD_REQUEST, "任务未配置源路径");
+        int retryTimes = task.getRetryTimes() == null ? 0 : Math.max(0, Math.min(task.getRetryTimes(), 5));
+        int intervalSeconds = task.getRetryIntervalSeconds() == null ? 0
+                : Math.max(0, Math.min(task.getRetryIntervalSeconds(), 30));
+        String lastError = null;
+        for (int attempt = 0; attempt <= retryTimes; attempt++) {
+            transferLog.setRetryCount((retryCount == null ? 0 : retryCount) + attempt);
+            try {
+                if (!StringUtils.hasText(source)) {
+                    throw new BizException(ErrorCode.BAD_REQUEST, "任务未配置源路径");
+                }
+                TransferOutcome outcome = performTransfer(task, source);
+                transferLog.setTargetFile(outcome.target());
+                transferLog.setFileSize(outcome.bytes());
+                transferLog.setMd5(outcome.md5());
+                transferLog.setStatus(OpsConstants.TRANSFER_SUCCESS);
+                transferLog.setErrorMsg(null);
+                task.setLastStatus(OpsConstants.TRANSFER_SUCCESS);
+                task.setLastMessage("传输成功：" + outcome.description());
+                lastError = null;
+                break;
+            } catch (Exception e) {
+                lastError = e.getMessage();
+                log.warn("文件传输失败 task={} source={} attempt={}/{} err={}", task.getId(), source,
+                        attempt + 1, retryTimes + 1, e.getMessage());
+                if (attempt < retryTimes) {
+                    if (intervalSeconds > 0) {
+                        try {
+                            Thread.sleep(intervalSeconds * 1000L);
+                        } catch (InterruptedException ie) {
+                            Thread.currentThread().interrupt();
+                            break;
+                        }
+                    }
+                }
             }
-            Path src = Paths.get(source).toAbsolutePath().normalize();
-            if (!Files.exists(src)) {
-                throw new BizException(ErrorCode.FILE_NOT_FOUND, "源路径不存在: " + source);
-            }
-            Path targetRoot = requireTarget(task);
-            CopyResult result = Files.isDirectory(src)
-                    ? copyDirectory(src, targetRoot)
-                    : copySingleFile(src, targetRoot);
-            transferLog.setTargetFile(result.target().toString());
-            transferLog.setFileSize(result.bytes());
-            transferLog.setMd5(result.md5());
-            transferLog.setStatus(OpsConstants.TRANSFER_SUCCESS);
-            transferLog.setEndTime(LocalDateTime.now());
-            transferLog.setCostMs(System.currentTimeMillis() - t0);
-            task.setLastStatus(OpsConstants.TRANSFER_SUCCESS);
-            task.setLastMessage("传输成功：" + result.description());
-        } catch (Exception e) {
+        }
+        transferLog.setEndTime(LocalDateTime.now());
+        transferLog.setCostMs(System.currentTimeMillis() - t0);
+        if (lastError != null) {
             transferLog.setStatus(OpsConstants.TRANSFER_FAIL);
-            transferLog.setErrorMsg(truncate(e.getMessage(), 900));
-            transferLog.setEndTime(LocalDateTime.now());
-            transferLog.setCostMs(System.currentTimeMillis() - t0);
+            transferLog.setErrorMsg(truncate(lastError, 900));
             task.setLastStatus(OpsConstants.TRANSFER_FAIL);
-            task.setLastMessage(truncate("传输失败：" + e.getMessage(), 480));
-            log.warn("文件传输失败 task={} source={} err={}", task.getId(), source, e.getMessage());
+            task.setLastMessage(truncate("传输失败：" + lastError, 480));
         }
         FlTransferLog saved = logRepository.save(transferLog);
         task.setLastRunTime(start);
         taskRepository.save(task);
         return saved;
+    }
+
+    /** 按源/目标类型分派：LOCAL↔LOCAL、LOCAL↔SFTP/FTP/FTPS、远端↔远端。 */
+    private TransferOutcome performTransfer(FlTransferTask task, String source) throws Exception {
+        String sourceType = normalizeType(task.getSourceType());
+        String targetType = normalizeType(task.getTargetType());
+        boolean sourceRemote = remoteFileService.isRemote(sourceType);
+        boolean targetRemote = remoteFileService.isRemote(targetType);
+        if (!sourceRemote && !"LOCAL".equals(sourceType)) {
+            throw new BizException(ErrorCode.BAD_REQUEST, "不支持的源类型: " + sourceType);
+        }
+        if (!targetRemote && !"LOCAL".equals(targetType)) {
+            throw new BizException(ErrorCode.BAD_REQUEST, "不支持的目标类型: " + targetType);
+        }
+        if (!sourceRemote && !targetRemote) {
+            return localToLocal(task, source);
+        }
+        if (sourceRemote) {
+            String remoteName = remoteFileName(source);
+            Path pullDir = storage.tmpDir().resolve("pull-" + UUID.randomUUID().toString().replace("-", ""));
+            storage.ensureDir(pullDir);
+            Path pulled = pullDir.resolve(remoteName);
+            try {
+                remoteFileService.download(remoteConfig(task, true), source, pulled);
+                if (!targetRemote) {
+                    return moveToLocal(task, pulled, remoteName, sourceType);
+                }
+                Path prepared = applyTransform(pulled, task);
+                try {
+                    return pushToRemote(task, prepared, sourceType + " → " + targetType);
+                } finally {
+                    cleanupTemp(prepared, pulled);
+                }
+            } finally {
+                try {
+                    Files.deleteIfExists(pulled);
+                    Files.deleteIfExists(pullDir);
+                } catch (IOException ignore) {
+                    // 临时文件清理失败不影响传输结果
+                }
+            }
+        }
+        Path src = Paths.get(source).toAbsolutePath().normalize();
+        if (!Files.exists(src)) {
+            throw new BizException(ErrorCode.FILE_NOT_FOUND, "源路径不存在: " + source);
+        }
+        if (Files.isDirectory(src)) {
+            throw new BizException(ErrorCode.BAD_REQUEST, "远端传输仅支持单文件（FILE）模式");
+        }
+        Path prepared = applyTransform(src, task);
+        try {
+            return pushToRemote(task, prepared, "LOCAL → " + targetType);
+        } finally {
+            cleanupTemp(prepared, src);
+        }
+    }
+
+    private TransferOutcome localToLocal(FlTransferTask task, String source) throws IOException {
+        Path src = Paths.get(source).toAbsolutePath().normalize();
+        if (!Files.exists(src)) {
+            throw new BizException(ErrorCode.FILE_NOT_FOUND, "源路径不存在: " + source);
+        }
+        Path targetRoot = requireTarget(task);
+        if (Files.isDirectory(src)) {
+            if (Boolean.TRUE.equals(task.getEncryptFlag()) || isGzip(task)) {
+                throw new BizException(ErrorCode.BAD_REQUEST, "目录模式不支持压缩/加密，请使用 FILE 模式");
+            }
+            CopyResult result = copyDirectory(src, targetRoot);
+            return new TransferOutcome(result.target().toString(), result.bytes(), result.md5(),
+                    result.description());
+        }
+        Path prepared = applyTransform(src, task);
+        try {
+            Path target = resolveLocalTarget(task.getTargetPath(), prepared.getFileName().toString());
+            if (target.getParent() != null) {
+                storage.ensureDir(target.getParent());
+            }
+            Files.copy(prepared, target, StandardCopyOption.REPLACE_EXISTING);
+            long bytes = Files.size(target);
+            String md5 = storage.md5(prepared);
+            if (!md5.equalsIgnoreCase(storage.md5(target))) {
+                throw new BizException(ErrorCode.FILE_CHECKSUM_MISMATCH, "目标文件 MD5 与源文件不一致");
+            }
+            String extra = prepared.equals(src) ? "MD5 一致" : "压缩/加密后 MD5 一致";
+            return new TransferOutcome(target.toString(), bytes, md5,
+                    "文件 " + src.getFileName() + " → " + target.getFileName() + "（" + bytes + " 字节，" + extra + "）");
+        } finally {
+            cleanupTemp(prepared, src);
+        }
+    }
+
+    private TransferOutcome pushToRemote(FlTransferTask task, Path prepared, String route) throws IOException {
+        String remotePath = resolveRemotePath(task.getTargetPath(), prepared.getFileName().toString());
+        RemoteFileService.RemoteConfig config = remoteConfig(task, false);
+        remoteFileService.upload(config, prepared, remotePath);
+        long localSize = Files.size(prepared);
+        long remoteSize = remoteFileService.size(config, remotePath);
+        if (remoteSize >= 0 && remoteSize != localSize) {
+            throw new BizException(ErrorCode.FILE_CHECKSUM_MISMATCH,
+                    "远端文件大小校验失败（本地 " + localSize + " / 远端 " + remoteSize + "）");
+        }
+        String md5 = storage.md5(prepared);
+        return new TransferOutcome(remotePath, localSize, md5,
+                route + " 上传 " + prepared.getFileName() + " → " + remotePath + "（" + localSize + " 字节，MD5 " + md5 + "）");
+    }
+
+    private TransferOutcome moveToLocal(FlTransferTask task, Path pulled, String remoteName,
+                                        String sourceType) throws IOException {
+        Path target = resolveLocalTarget(task.getTargetPath(), remoteName);
+        if (target.getParent() != null) {
+            storage.ensureDir(target.getParent());
+        }
+        Files.copy(pulled, target, StandardCopyOption.REPLACE_EXISTING);
+        long bytes = Files.size(target);
+        String md5 = storage.md5(pulled);
+        if (!md5.equalsIgnoreCase(storage.md5(target))) {
+            throw new BizException(ErrorCode.FILE_CHECKSUM_MISMATCH, "下载后 MD5 校验不一致");
+        }
+        return new TransferOutcome(target.toString(), bytes, md5,
+                sourceType + " → LOCAL 下载 " + remoteName + " → " + target + "（" + bytes + " 字节，MD5 一致）");
+    }
+
+    /** 按任务配置做 GZIP 压缩 / AES-256-GCM 加密，返回处理后的临时文件（无处理则原样返回）。 */
+    private Path applyTransform(Path src, FlTransferTask task) throws IOException {
+        boolean gzip = isGzip(task);
+        boolean encrypt = Boolean.TRUE.equals(task.getEncryptFlag());
+        if (!gzip && !encrypt) {
+            return src;
+        }
+        String name = src.getFileName().toString() + (gzip ? ".gz" : "") + (encrypt ? ".enc" : "");
+        Path txDir = storage.tmpDir().resolve("tx-" + UUID.randomUUID().toString().replace("-", ""));
+        storage.ensureDir(txDir);
+        Path out = txDir.resolve(safeName(name));
+        try (OutputStream raw = Files.newOutputStream(out)) {
+            OutputStream encoded = encrypt ? CryptoUtil.encryptingStream(raw, key()) : raw;
+            if (gzip) {
+                try (GZIPOutputStream gz = new GZIPOutputStream(encoded)) {
+                    Files.copy(src, gz);
+                }
+            } else {
+                Files.copy(src, encoded);
+                encoded.close();
+            }
+        }
+        return out;
+    }
+
+    private void cleanupTemp(Path prepared, Path original) {
+        if (prepared == null || prepared.equals(original)) {
+            return;
+        }
+        try {
+            Files.deleteIfExists(prepared);
+            Path parent = prepared.getParent();
+            if (parent != null && parent.getFileName() != null
+                    && parent.getFileName().toString().startsWith("tx-")) {
+                Files.deleteIfExists(parent);
+            }
+        } catch (IOException ignore) {
+            // 临时文件清理失败不影响传输结果
+        }
+    }
+
+    private boolean isGzip(FlTransferTask task) {
+        return "GZIP".equalsIgnoreCase(task.getCompress());
+    }
+
+    private String normalizeType(String type) {
+        return type == null || type.isBlank() ? "LOCAL" : type.trim().toUpperCase(Locale.ROOT);
+    }
+
+    private Path resolveLocalTarget(String rawPath, String fileName) {
+        Path targetPath = Paths.get(rawPath).toAbsolutePath().normalize();
+        boolean dir = rawPath.endsWith("/") || rawPath.endsWith("\\") || Files.isDirectory(targetPath);
+        return dir ? targetPath.resolve(fileName) : targetPath;
+    }
+
+    private String resolveRemotePath(String rawPath, String fileName) {
+        String path = rawPath.replace('\\', '/');
+        return path.endsWith("/") ? path + fileName : path;
+    }
+
+    private String remoteFileName(String remotePath) {
+        String path = remotePath.replace('\\', '/');
+        int idx = path.lastIndexOf('/');
+        String name = idx >= 0 ? path.substring(idx + 1) : path;
+        return safeName(name.isBlank() ? "remote-file" : name);
+    }
+
+    private RemoteFileService.RemoteConfig remoteConfig(FlTransferTask task, boolean source) {
+        String type = normalizeType(source ? task.getSourceType() : task.getTargetType());
+        String host = source ? task.getSourceHost() : task.getTargetHost();
+        Integer port = source ? task.getSourcePort() : task.getTargetPort();
+        String username = source ? task.getSourceUsername() : task.getTargetUsername();
+        String password = decryptPassword(source ? task.getSourcePassword() : task.getTargetPassword());
+        int defaultPort = "SFTP".equals(type) ? 22 : 21;
+        return new RemoteFileService.RemoteConfig(type, host, port == null ? defaultPort : port, username, password);
+    }
+
+    private SecretKeySpec key() {
+        if (secretKey == null) {
+            secretKey = CryptoUtil.deriveKey(cryptoKey);
+        }
+        return secretKey;
+    }
+
+    private String encryptPassword(String plain) {
+        return StringUtils.hasText(plain) ? CryptoUtil.encrypt(plain, key()) : null;
+    }
+
+    private String decryptPassword(String cipher) {
+        if (!StringUtils.hasText(cipher)) {
+            return null;
+        }
+        try {
+            return CryptoUtil.decrypt(cipher, key());
+        } catch (Exception e) {
+            throw new BizException(ErrorCode.BUSINESS, "远端口令解密失败，请重新填写口令");
+        }
+    }
+
+    private String safeName(String name) {
+        String value = name == null ? "file" : name.replaceAll("[\\\\/:*?\"<>|\\r\\n\\t]", "_");
+        return value.length() > 100 ? value.substring(value.length() - 100) : value;
+    }
+
+    private record TransferOutcome(String target, long bytes, String md5, String description) {
     }
 
     // ================= 复制实现 =================
@@ -384,6 +677,18 @@ public class TransferService {
         m.put("lastMessage", t.getLastMessage());
         m.put("lastScanTime", t.getLastScanTime());
         m.put("remark", t.getRemark());
+        m.put("sourceHost", t.getSourceHost());
+        m.put("sourcePort", t.getSourcePort());
+        m.put("sourceUsername", t.getSourceUsername());
+        m.put("sourcePasswordSet", StringUtils.hasText(t.getSourcePassword()));
+        m.put("targetHost", t.getTargetHost());
+        m.put("targetPort", t.getTargetPort());
+        m.put("targetUsername", t.getTargetUsername());
+        m.put("targetPasswordSet", StringUtils.hasText(t.getTargetPassword()));
+        m.put("compress", t.getCompress());
+        m.put("encryptFlag", Boolean.TRUE.equals(t.getEncryptFlag()));
+        m.put("retryTimes", t.getRetryTimes());
+        m.put("retryIntervalSeconds", t.getRetryIntervalSeconds());
         m.put("createTime", t.getCreateTime());
         m.put("updateTime", t.getUpdateTime());
         m.put("nextRunTime", nextRunTime(t));

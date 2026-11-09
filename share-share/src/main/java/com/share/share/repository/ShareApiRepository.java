@@ -20,5 +20,7 @@ public interface ShareApiRepository extends JpaRepository<ShareApi, Long>, JpaSp
 
     List<ShareApi> findByStatusAndDeletedFalseOrderByIdAsc(String status);
 
+    List<ShareApi> findByDeletedFalseOrderByIdAsc();
+
     long countByStatusAndDeletedFalse(String status);
 }

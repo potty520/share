@@ -46,7 +46,8 @@
           <el-col :span="12">
             <el-form-item label="源端类型" prop="sourceType">
               <el-select v-model="form.sourceType" style="width: 100%">
-                <el-option label="平台库表 / 数据源表" value="H2_TABLE" />
+                <el-option label="平台内置库表" value="H2_TABLE" />
+                <el-option label="外部 JDBC 表" value="JDBC_TABLE" />
                 <el-option label="CSV 文件" value="CSV_FILE" />
               </el-select>
             </el-form-item>
@@ -64,6 +65,18 @@
               <el-input v-model="form.filterCondition" placeholder="可选，如 status = 'NORMAL'" />
             </el-form-item>
           </el-col>
+          <template v-if="form.taskType === 'INCREMENT' && form.sourceType !== 'CSV_FILE'">
+            <el-col :span="12">
+              <el-form-item label="增量字段" prop="sourceIncrementColumn">
+                <el-input v-model="form.sourceIncrementColumn" placeholder="如 update_time 或 id（时间戳/自增字段）" />
+              </el-form-item>
+            </el-col>
+            <el-col :span="12">
+              <el-form-item label="增量起点">
+                <el-input v-model="form.sourceIncrementStart" placeholder="可选，如 2026-01-01 00:00:00 或 10000" />
+              </el-form-item>
+            </el-col>
+          </template>
           <el-col :span="24">
             <el-form-item label="任务描述">
               <el-input v-model="form.remark" type="textarea" :rows="2" maxlength="300" show-word-limit placeholder="描述任务用途与数据流向" />
@@ -178,8 +191,16 @@
           <el-col :span="12">
             <el-form-item label="目标类型" prop="targetType">
               <el-select v-model="form.targetType" style="width: 100%">
-                <el-option label="平台库表" value="H2_TABLE" />
+                <el-option label="平台内置库表" value="H2_TABLE" />
+                <el-option label="外部 JDBC 表" value="JDBC_TABLE" />
                 <el-option label="CSV 文件" value="CSV_FILE" />
+              </el-select>
+            </el-form-item>
+          </el-col>
+          <el-col v-if="form.targetType === 'JDBC_TABLE'" :span="12">
+            <el-form-item label="目标数据源" prop="targetId">
+              <el-select v-model="form.targetId" filterable placeholder="选择外部目标数据源" style="width: 100%">
+                <el-option v-for="s in sources" :key="s.id" :label="s.name" :value="s.id" />
               </el-select>
             </el-form-item>
           </el-col>
@@ -249,12 +270,15 @@ const form = reactive({
   sourceId: null,
   sourceType: 'H2_TABLE',
   sourceTable: '',
+  sourceIncrementColumn: '',
+  sourceIncrementStart: '',
   filterCondition: '',
   remark: '',
   mapping: [],
   operators: [],
   targetType: 'H2_TABLE',
   targetTable: '',
+  targetId: null,
   scheduleCron: '',
   enabled: true
 })
@@ -262,11 +286,13 @@ const form = reactive({
 const step0Rules = {
   taskName: [{ required: true, message: '请输入任务名称', trigger: 'blur' }],
   sourceType: [{ required: true, message: '请选择源端类型', trigger: 'change' }],
-  sourceTable: [{ required: true, message: '请填写源表名或文件路径', trigger: 'blur' }]
+  sourceTable: [{ required: true, message: '请填写源表名或文件路径', trigger: 'blur' }],
+  sourceIncrementColumn: [{ required: true, message: '增量任务必须填写增量字段', trigger: 'blur' }]
 }
 const step2Rules = {
   targetType: [{ required: true, message: '请选择目标类型', trigger: 'change' }],
-  targetTable: [{ required: true, message: '请填写目标表名或文件路径', trigger: 'blur' }]
+  targetTable: [{ required: true, message: '请填写目标表名或文件路径', trigger: 'blur' }],
+  targetId: [{ required: true, message: '外部 JDBC 目标必须选择数据源', trigger: 'change' }]
 }
 
 const definitionPreview = computed(() =>
@@ -278,15 +304,18 @@ const definitionPreview = computed(() =>
       source: {
         sourceId: form.sourceId,
         sourceType: form.sourceType,
-        tableName: form.sourceType === 'H2_TABLE' ? form.sourceTable : undefined,
+        tableName: form.sourceType !== 'CSV_FILE' ? form.sourceTable : undefined,
         filePath: form.sourceType === 'CSV_FILE' ? form.sourceTable : undefined,
+        incrementColumn: form.taskType === 'INCREMENT' && form.sourceType !== 'CSV_FILE' ? form.sourceIncrementColumn : undefined,
+        incrementStart: form.taskType === 'INCREMENT' && form.sourceType !== 'CSV_FILE' ? form.sourceIncrementStart || undefined : undefined,
         filterCondition: form.filterCondition || undefined
       },
       mapping: form.mapping,
       operators: normalizedOperators(),
       target: {
         targetType: form.targetType,
-        tableName: form.targetType === 'H2_TABLE' ? form.targetTable : undefined,
+        targetId: form.targetType === 'JDBC_TABLE' ? form.targetId : undefined,
+        tableName: form.targetType !== 'CSV_FILE' ? form.targetTable : undefined,
         filePath: form.targetType === 'CSV_FILE' ? form.targetTable : undefined
       },
       schedule: { cron: form.scheduleCron || undefined, enabled: form.enabled }
@@ -421,11 +450,14 @@ async function submit() {
       taskType: form.taskType,
       sourceId: form.sourceId,
       sourceType: form.sourceType,
-      sourceName: form.sourceType === 'H2_TABLE' ? form.sourceTable : undefined,
-      sourceTable: form.sourceType === 'H2_TABLE' ? form.sourceTable : undefined,
+      sourceName: form.sourceType !== 'CSV_FILE' ? form.sourceTable : undefined,
+      sourceTable: form.sourceType !== 'CSV_FILE' ? form.sourceTable : undefined,
       sourceFilePath: form.sourceType === 'CSV_FILE' ? form.sourceTable : undefined,
+      sourceIncrementColumn: form.taskType === 'INCREMENT' && form.sourceType !== 'CSV_FILE' ? form.sourceIncrementColumn : undefined,
+      sourceIncrementStart: form.taskType === 'INCREMENT' && form.sourceType !== 'CSV_FILE' ? form.sourceIncrementStart || undefined : undefined,
       targetType: form.targetType,
-      targetTable: form.targetType === 'H2_TABLE' ? form.targetTable : undefined,
+      targetId: form.targetType === 'JDBC_TABLE' ? form.targetId : undefined,
+      targetTable: form.targetType !== 'CSV_FILE' ? form.targetTable : undefined,
       targetFilePath: form.targetType === 'CSV_FILE' ? form.targetTable : undefined,
       filterCondition: form.filterCondition || undefined,
       scheduleCron: form.scheduleCron || undefined,

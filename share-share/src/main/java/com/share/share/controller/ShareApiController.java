@@ -121,4 +121,29 @@ public class ShareApiController {
                                              @RequestParam(required = false) String to) {
         return Result.ok(callStatService.stats(apiId, from, to));
     }
+
+    /** API 历史版本列表。 */
+    @GetMapping("/apis/{id}/versions")
+    @RequirePermission(PermissionConstants.SHARE_READ)
+    public Result<List<Map<String, Object>>> versions(@PathVariable Long id) {
+        return Result.ok(shareApiService.versions(id));
+    }
+
+    /** 冻结当前配置为新版本（可附发布说明）。 */
+    @PostMapping("/apis/{id}/versions")
+    @RequirePermission(PermissionConstants.SHARE_WRITE)
+    @AuditLog(action = "SHARE_API_VERSION_PUBLISH", targetType = "SHARE_API")
+    public Result<Map<String, Object>> publishVersion(@PathVariable Long id,
+                                                      @RequestBody(required = false) Map<String, Object> body) {
+        String note = body == null || body.get("note") == null ? null : String.valueOf(body.get("note"));
+        return Result.ok(shareApiService.publishVersion(id, note));
+    }
+
+    /** 回滚到指定版本（生成新的递增版本号）。 */
+    @PostMapping("/apis/{id}/versions/{versionNo}/rollback")
+    @RequirePermission(PermissionConstants.SHARE_WRITE)
+    @AuditLog(action = "SHARE_API_VERSION_ROLLBACK", targetType = "SHARE_API")
+    public Result<Map<String, Object>> rollback(@PathVariable Long id, @PathVariable Integer versionNo) {
+        return Result.ok(shareApiService.rollback(id, versionNo));
+    }
 }

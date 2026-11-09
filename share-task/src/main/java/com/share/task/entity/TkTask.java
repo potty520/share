@@ -35,6 +35,18 @@ public class TkTask extends BaseEntity {
     @Column(name = "source_id")
     private Long sourceId;
 
+    /** 源端增量字段（时间戳/自增 ID），INCREMENT 任务必填 */
+    @Column(name = "source_increment_column", length = 128)
+    private String sourceIncrementColumn;
+
+    /** 首次增量起点，为空表示从源端全量数据开始 */
+    @Column(name = "source_increment_start", length = 128)
+    private String sourceIncrementStart;
+
+    /** 最近一次成功增量水位（仅成功后更新） */
+    @Column(name = "last_watermark", length = 128)
+    private String lastWatermark;
+
     /** 源数据源名称（冗余展示） */
     @Column(name = "source_name", length = 200)
     private String sourceName;
@@ -58,6 +70,10 @@ public class TkTask extends BaseEntity {
     /** 目标表名（目标为库表时使用） */
     @Column(name = "target_table", length = 128)
     private String targetTable;
+
+    /** 目标数据源 ID；为空时写入平台库 */
+    @Column(name = "target_id")
+    private Long targetId;
 
     /** 目标文件路径（目标为 CSV 时使用） */
     @Column(name = "target_file_path", length = 500)

@@ -13,7 +13,9 @@ import com.share.share.entity.ShareApi;
 import com.share.share.entity.ShareApiParam;
 import com.share.share.repository.ShareApiParamRepository;
 import com.share.share.repository.ShareApiRepository;
+import com.share.share.repository.ShareApiVersionRepository;
 import com.share.share.repository.ShareCredentialRepository;
+import com.share.share.entity.ShareApiVersion;
 import com.share.share.support.CrossDomainQueryService;
 import com.share.share.support.PageResult;
 import com.share.share.support.ShareUtils;
@@ -45,6 +47,8 @@ public class ShareApiService {
 
     private final ShareApiRepository apiRepository;
     private final ShareApiParamRepository paramRepository;
+    private final ApisixGatewayService apisixGatewayService;
+    private final ShareApiVersionRepository versionRepository;
     private final ShareCredentialRepository credentialRepository;
     private final DataQueryService dataQueryService;
     private final ShareCallStatService callStatService;
@@ -102,6 +106,7 @@ public class ShareApiService {
         data.put("routeConfigObject", parseJson(api.getRouteConfig()));
         data.put("apiDocUrl", "/api/share/v1/apis/" + id + "/doc");
         data.put("openUrl", "/api/open/v1/" + api.getApiCode());
+        data.put("versionCount", versionRepository.findByApiIdAndDeletedFalseOrderByVersionNoDesc(id).size());
         return data;
     }
 
@@ -152,6 +157,7 @@ public class ShareApiService {
             // 上线态修改后刷新网关路由配置（返回字段/参数/QPS 变更需立即生效）
             api.setRouteConfig(buildRouteConfig(api, true));
             apiRepository.save(api);
+            syncApisix(api, true);
         }
         log.info("修改共享服务 id={} code={}", id, api.getApiCode());
         return detail(id);
@@ -183,12 +189,20 @@ public class ShareApiService {
             // 重复上线幂等：只刷新路由配置
             api.setRouteConfig(buildRouteConfig(api, true));
             apiRepository.save(api);
+            syncApisix(api, true);
             return detail(id);
         }
+        boolean firstPublish = versionRepository.findTopByApiIdAndDeletedFalseOrderByVersionNoDesc(id).isEmpty();
+        int versionNo = firstPublish ? Math.max(1, api.getVersionNo() == null ? 1 : api.getVersionNo())
+                : nextVersionNo(api);
+        api.setVersionNo(versionNo);
+        api.setApiVersion("v" + versionNo);
         api.setStatus(ShareConstants.API_ONLINE);
         api.setOnlineTime(LocalDateTime.now());
         api.setRouteConfig(buildRouteConfig(api, true));
         apiRepository.save(api);
+        saveSnapshot(api, versionNo, "上线发布", ShareConstants.API_ONLINE);
+        syncApisix(api, true);
         log.info("共享服务上线 code={} route={}", api.getApiCode(), api.getRouteConfig());
         return detail(id);
     }
@@ -203,8 +217,150 @@ public class ShareApiService {
         api.setStatus(ShareConstants.API_OFFLINE);
         api.setRouteConfig(buildRouteConfig(api, false));
         apiRepository.save(api);
+        syncApisix(api, false);
         log.info("共享服务下线 code={}", api.getApiCode());
         return detail(id);
+    }
+
+    /** 历史版本列表（含版本号、标签、发布说明与发布时间）。 */
+    public List<Map<String, Object>> versions(Long id) {
+        findOrThrow(id);
+        List<Map<String, Object>> list = new ArrayList<>();
+        for (ShareApiVersion v : versionRepository.findByApiIdAndDeletedFalseOrderByVersionNoDesc(id)) {
+            list.add(versionView(v));
+        }
+        return list;
+    }
+
+    /** 手工冻结当前配置为新版本（可用于上线态变更留痕）。 */
+    @Transactional
+    public Map<String, Object> publishVersion(Long id, String note) {
+        ShareApi api = findOrThrow(id);
+        int versionNo = nextVersionNo(api);
+        api.setVersionNo(versionNo);
+        api.setApiVersion("v" + versionNo);
+        api.setVersionNote(ShareUtils.truncate(note == null || note.isBlank() ? "手工发布版本" : note, 255));
+        if (ShareConstants.API_ONLINE.equals(api.getStatus())) {
+            api.setRouteConfig(buildRouteConfig(api, true));
+        }
+        apiRepository.save(api);
+        ShareApiVersion snapshot = saveSnapshot(api, versionNo, api.getVersionNote(), api.getStatus());
+        if (ShareConstants.API_ONLINE.equals(api.getStatus())) {
+            syncApisix(api, true);
+        }
+        log.info("共享服务发布新版本 id={} code={} version=v{}", id, api.getApiCode(), versionNo);
+        return versionView(snapshot);
+    }
+
+    /** 回滚到指定历史版本：恢复配置并生成新的版本号（版本号只增不减）。 */
+    @Transactional
+    public Map<String, Object> rollback(Long id, Integer versionNo) {
+        ShareApi api = findOrThrow(id);
+        ShareApiVersion target = versionRepository.findByApiIdAndVersionNoAndDeletedFalse(id, versionNo)
+                .orElseThrow(() -> new BizException(ErrorCode.NOT_FOUND, "版本不存在: v" + versionNo));
+        Map<String, Object> snapshot = JsonUtil.fromJson(target.getSnapshotJson(),
+                new com.fasterxml.jackson.core.type.TypeReference<Map<String, Object>>() {
+                });
+        if (snapshot == null || snapshot.isEmpty()) {
+            throw new BizException(ErrorCode.CONFLICT, "版本快照内容为空，无法回滚");
+        }
+        int newVersion = nextVersionNo(api);
+        restore(api, snapshot);
+        api.setVersionNo(newVersion);
+        api.setApiVersion("v" + newVersion);
+        api.setVersionNote("回滚自 v" + versionNo);
+        if (ShareConstants.API_ONLINE.equals(api.getStatus())) {
+            api.setRouteConfig(buildRouteConfig(api, true));
+        }
+        apiRepository.save(api);
+        ShareApiVersion snapshotRow = saveSnapshot(api, newVersion, api.getVersionNote(), api.getStatus());
+        if (ShareConstants.API_ONLINE.equals(api.getStatus())) {
+            syncApisix(api, true);
+        }
+        log.info("共享服务回滚 id={} code={} 从 v{} 回滚为 v{}", id, api.getApiCode(), versionNo, newVersion);
+        return versionView(snapshotRow);
+    }
+
+    private int nextVersionNo(ShareApi api) {
+        int max = versionRepository.findTopByApiIdAndDeletedFalseOrderByVersionNoDesc(api.getId())
+                .map(ShareApiVersion::getVersionNo).orElse(0);
+        int current = api.getVersionNo() == null ? 0 : api.getVersionNo();
+        return Math.max(max, current) + 1;
+    }
+
+    private ShareApiVersion saveSnapshot(ShareApi api, int versionNo, String note, String status) {
+        ShareApiVersion version = new ShareApiVersion();
+        version.setApiId(api.getId());
+        version.setApiCode(api.getApiCode());
+        version.setVersionNo(versionNo);
+        version.setVersionLabel("v" + versionNo);
+        version.setStatus(status);
+        version.setNote(ShareUtils.truncate(note, 255));
+        version.setEditor(UserContext.username());
+        version.setPublishedTime(LocalDateTime.now());
+        version.setSnapshotJson(JsonUtil.toJson(toMap(api)));
+        return versionRepository.save(version);
+    }
+
+    @SuppressWarnings("unchecked")
+    private void restore(ShareApi api, Map<String, Object> snapshot) {
+        if (snapshot.get("apiCode") != null) {
+            String code = String.valueOf(snapshot.get("apiCode")).trim().toUpperCase();
+            if (!code.equals(api.getApiCode()) && !apiRepository.existsByApiCodeAndDeletedFalse(code)) {
+                api.setApiCode(code);
+            }
+        }
+        api.setApiName(stringValue(snapshot.get("apiName"), api.getApiName()));
+        api.setCatalogId(longValue(snapshot.get("catalogId")));
+        api.setCatalogName(stringValue(snapshot.get("catalogName"), api.getCatalogName()));
+        api.setSourceId(longValue(snapshot.get("sourceId")));
+        api.setSourceTable(stringValue(snapshot.get("sourceTable"), api.getSourceTable()));
+        api.setHttpMethod(stringValue(snapshot.get("httpMethod"), api.getHttpMethod()));
+        api.setParamsJson(stringValue(snapshot.get("paramsJson"), api.getParamsJson()));
+        api.setReturnFields(stringValue(snapshot.get("returnFields"), api.getReturnFields()));
+        api.setMaskFields(stringValue(snapshot.get("maskFields"), api.getMaskFields()));
+        if (snapshot.get("qpsLimit") instanceof Number n) {
+            api.setQpsLimit(n.intValue());
+        }
+        api.setOwner(stringValue(snapshot.get("owner"), api.getOwner()));
+        api.setRemark(stringValue(snapshot.get("remark"), api.getRemark()));
+        String status = stringValue(snapshot.get("status"), api.getStatus());
+        if (List.of(ShareConstants.API_DRAFT, ShareConstants.API_ONLINE, ShareConstants.API_OFFLINE).contains(status)) {
+            api.setStatus(status);
+        }
+        syncParams(api.getId(), api.getParamsJson());
+    }
+
+    private Map<String, Object> versionView(ShareApiVersion v) {
+        Map<String, Object> item = new LinkedHashMap<>();
+        item.put("id", v.getId());
+        item.put("apiId", v.getApiId());
+        item.put("apiCode", v.getApiCode());
+        item.put("versionNo", v.getVersionNo());
+        item.put("versionLabel", v.getVersionLabel());
+        item.put("status", v.getStatus());
+        item.put("note", v.getNote());
+        item.put("editor", v.getEditor());
+        item.put("publishedTime", v.getPublishedTime());
+        return item;
+    }
+
+    private static String stringValue(Object value, String fallback) {
+        return value == null ? fallback : String.valueOf(value);
+    }
+
+    private static Long longValue(Object value) {
+        if (value == null) {
+            return null;
+        }
+        if (value instanceof Number n) {
+            return n.longValue();
+        }
+        try {
+            return Long.parseLong(String.valueOf(value));
+        } catch (NumberFormatException e) {
+            return null;
+        }
     }
 
     /**
@@ -452,6 +608,23 @@ public class ShareApiService {
                 "fields", ShareUtils.split(api.getMaskFields()),
                 "mode", "by-grant-level",
                 "requiredLevel", crossDomainQueryService.catalogLevel(api.getCatalogId()))));
+        plugins.add(Map.of("name", "ip-acl", "config", Map.of(
+                "whitelist", "credential.ipWhitelist",
+                "blacklist", "credential.ipBlacklist",
+                "order", "deny-first")));
+        plugins.add(Map.of("name", "cluster-limit", "config", Map.of(
+                "key", "appKey",
+                "rate", api.getQpsLimit() == null ? 100 : api.getQpsLimit(),
+                "scope", "cluster",
+                "rejectCode", ErrorCode.SHARE_QPS_LIMITED.getCode())));
+        plugins.add(Map.of("name", "circuit-breaker", "config", Map.of(
+                "failureThreshold", 5,
+                "windowSeconds", 60,
+                "openSeconds", 30,
+                "rejectCode", ErrorCode.SHARE_API_CIRCUIT_OPEN.getCode())));
+        plugins.add(Map.of("name", "api-version", "config", Map.of(
+                "header", "X-Api-Version",
+                "current", api.getApiVersion() == null ? "v1" : api.getApiVersion())));
         List<String> paramNames = dataQueryService.paramsOf(api.getId()).stream()
                 .map(ShareApiParam::getParamName).toList();
         plugins.add(Map.of("name", "param-validate", "config", Map.of("params", paramNames)));
@@ -465,6 +638,15 @@ public class ShareApiService {
                 new com.fasterxml.jackson.core.type.TypeReference<Map<String, Object>>() {
                 });
         return new LinkedHashMap<>(map);
+    }
+
+    private void syncApisix(ShareApi api, boolean enabled) {
+        ApisixGatewayService.SyncResult result = apisixGatewayService.sync(api, enabled);
+        api.setGatewayRouteId(result.routeId());
+        api.setGatewaySyncStatus(result.status());
+        api.setGatewaySyncTime(LocalDateTime.now());
+        api.setGatewayError(result.success() ? null : ShareUtils.truncate(result.message(), 480));
+        apiRepository.save(api);
     }
 
     private Object parseJson(String json) {

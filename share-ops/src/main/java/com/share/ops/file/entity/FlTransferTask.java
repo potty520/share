@@ -73,4 +73,47 @@ public class FlTransferTask extends BaseEntity {
 
     @Column(name = "remark", length = 500)
     private String remark;
+
+    // ===== 远端连接参数（FR-09：FTP/FTPS/SFTP） =====
+    @Column(name = "source_host", length = 200)
+    private String sourceHost;
+
+    @Column(name = "source_port")
+    private Integer sourcePort;
+
+    @Column(name = "source_username", length = 128)
+    private String sourceUsername;
+
+    /** 源端口令（AES-GCM 加密存储，接口不回显） */
+    @Column(name = "source_password", columnDefinition = "TEXT")
+    private String sourcePassword;
+
+    @Column(name = "target_host", length = 200)
+    private String targetHost;
+
+    @Column(name = "target_port")
+    private Integer targetPort;
+
+    @Column(name = "target_username", length = 128)
+    private String targetUsername;
+
+    /** 目标端口令（AES-GCM 加密存储，接口不回显） */
+    @Column(name = "target_password", columnDefinition = "TEXT")
+    private String targetPassword;
+
+    /** 传输压缩：NONE / GZIP（FILE 模式生效，目标文件追加 .gz） */
+    @Column(name = "compress", length = 16)
+    private String compress = "NONE";
+
+    /** 是否对传输文件做 AES-256-GCM 加密（目标文件追加 .enc） */
+    @Column(name = "encrypt_flag")
+    private Boolean encryptFlag = false;
+
+    /** 失败自动重试次数 */
+    @Column(name = "retry_times")
+    private Integer retryTimes = 2;
+
+    /** 重试间隔（秒） */
+    @Column(name = "retry_interval_seconds")
+    private Integer retryIntervalSeconds = 5;
 }

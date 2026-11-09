@@ -42,6 +42,7 @@ public class AuthService {
     private final JwtTokenUtil jwtTokenUtil;
     private final SmsCodeService smsCodeService;
     private final TokenBlacklistService blacklistService;
+    private final RedisSessionService redisSessionService;
     private final RbacPermissionProvider permissionProvider;
     private final MenuService menuService;
 
@@ -82,7 +83,7 @@ public class AuthService {
         user.setLoginFailCount(0);
         userRepository.save(user);
         log.info("用户登录成功: username={}, role={}", user.getUsername(), user.getRoleCode());
-        return buildTokens(user, true);
+        return buildTokens(user, true, clientIp);
     }
 
     /** 生成短信验证码（演示环境直接返回验证码）。 */
@@ -121,7 +122,7 @@ public class AuthService {
         }
         // 令牌轮换：旧 refresh token 立即失效
         blacklistService.revoke(refreshToken, REFRESH_TTL_MILLIS);
-        return buildTokens(user, true);
+        return buildTokens(user, true, null);
     }
 
     /** 登出：access / refresh 均加入内存黑名单。 */
@@ -132,6 +133,8 @@ public class AuthService {
         if (refreshToken != null && !refreshToken.isBlank()) {
             blacklistService.revoke(refreshToken, REFRESH_TTL_MILLIS);
         }
+        redisSessionService.remove(accessToken);
+        redisSessionService.remove(refreshToken);
     }
 
     /** 当前用户信息 + 权限 + 菜单。 */
@@ -192,7 +195,7 @@ public class AuthService {
     }
 
     /** 签发 access + refresh 令牌并组装返回体。 */
-    private LoginResponse.TokenResult buildTokens(SysUser user, boolean mfaPassed) {
+    private LoginResponse.TokenResult buildTokens(SysUser user, boolean mfaPassed, String clientIp) {
         LoginUser loginUser = LoginUser.builder()
                 .userId(user.getId())
                 .username(user.getUsername())
@@ -204,6 +207,7 @@ public class AuthService {
                 .build();
         String accessToken = jwtTokenUtil.createAccessToken(loginUser);
         String refreshToken = jwtTokenUtil.createRefreshToken(loginUser);
+        redisSessionService.register(loginUser, accessToken, refreshToken, clientIp);
         Set<String> permissions = permissionProvider.permissionsOf(loginUser.getRoleCode());
         return new LoginResponse.TokenResult(accessToken, refreshToken, "Bearer",
                 jwtTokenUtil.getAccessMinutes() * 60, userInfo(user), List.copyOf(permissions));

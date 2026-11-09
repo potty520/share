@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<configuration>
+    <springProperty scope="context" name="APP_NAME" source="spring.application.name" defaultValue="share-exchange"/>
+    <springProperty scope="context" name="LOG_FILE" source="logging.file.name" defaultValue="./data/logs/share-exchange.log"/>
+    <springProperty scope="context" name="LOKI_URL" source="share.observability.loki.url" defaultValue="http://127.0.0.1:3100/loki/api/v1/push"/>
+
+    <property name="LOG_PATTERN" value="%d{yyyy-MM-dd HH:mm:ss.SSS} %-5level [%thread] traceId=%X{traceId:-} batchId=%X{batchId:-} %logger{40} - %msg%n"/>
+
+    <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+        <encoder>
+            <pattern>${LOG_PATTERN}</pattern>
+            <charset>UTF-8</charset>
+        </encoder>
+    </appender>
+
+    <appender name="FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
+        <file>${LOG_FILE}</file>
+        <rollingPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedRollingPolicy">
+            <fileNamePattern>${LOG_FILE}.%d{yyyy-MM-dd}.%i.gz</fileNamePattern>
+            <maxFileSize>100MB</maxFileSize>
+            <maxHistory>30</maxHistory>
+            <totalSizeCap>3GB</totalSizeCap>
+        </rollingPolicy>
+        <encoder>
+            <pattern>${LOG_PATTERN}</pattern>
+            <charset>UTF-8</charset>
+        </encoder>
+    </appender>
+
+    <springProfile name="loki">
+        <appender name="LOKI" class="com.github.loki4j.logback.Loki4jAppender">
+            <http>
+                <url>${LOKI_URL}</url>
+                <connectionTimeoutMs>3000</connectionTimeoutMs>
+                <requestTimeoutMs>5000</requestTimeoutMs>
+            </http>
+            <format>
+                <label>
+                    <pattern>app=${APP_NAME},host=${HOSTNAME},level=%level</pattern>
+                </label>
+                <message>
+                    <pattern>%d{yyyy-MM-dd HH:mm:ss.SSS} traceId=%X{traceId:-} batchId=%X{batchId:-} %-5level [%thread] %logger{40} - %msg%n</pattern>
+                </message>
+            </format>
+            <batchMaxSize>200</batchMaxSize>
+            <batchTimeoutMs>2000</batchTimeoutMs>
+        </appender>
+    </springProfile>
+
+    <root level="INFO">
+        <appender-ref ref="CONSOLE"/>
+        <appender-ref ref="FILE"/>
+    </root>
+
+    <springProfile name="loki">
+        <root level="INFO">
+            <appender-ref ref="CONSOLE"/>
+            <appender-ref ref="FILE"/>
+            <appender-ref ref="LOKI"/>
+        </root>
+    </springProfile>
+</configuration>

@@ -46,6 +46,9 @@ public interface AudOperationLogRepository extends JpaRepository<AudOperationLog
     /** 连续失败分析用：按时间倒序取最近失败/成功记录 */
     List<AudOperationLog> findTop200ByDeletedFalseOrderByOperateTimeDesc();
 
+    /** 保留期清理：取出超过截止时间的未删除日志 */
+    List<AudOperationLog> findByDeletedFalseAndOperateTimeBefore(LocalDateTime cutoff);
+
     /** 数据流转追踪：按目标对象 ID 或明细关键词检索 */
     @Query("select l from AudOperationLog l where l.deleted = false and "
             + "(l.targetId = :key or l.detail like concat('%', :key, '%')) order by l.operateTime asc")

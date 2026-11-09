@@ -79,4 +79,12 @@ public class FlFile extends BaseEntity {
 
     @Column(name = "remark", length = 500)
     private String remark;
+
+    /** 存储后端：LOCAL / MINIO */
+    @Column(name = "storage_type", length = 20)
+    private String storageType = "LOCAL";
+
+    /** 对象存储 key（MinIO 启用时写入） */
+    @Column(name = "object_key", length = 600)
+    private String objectKey;
 }

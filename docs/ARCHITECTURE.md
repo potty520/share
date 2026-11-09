@@ -4,21 +4,24 @@
 
 ## 1. 实现形态
 
-设计文档的部署形态为“微服务 + 引擎 + 中间件”。受交付环境（单机 Windows、无容器/中间件）约束，一期实现采用**模块化单体**：
+设计文档的部署形态为“微服务 + 引擎 + 中间件”。代码保持**模块化**；VM 演示环境已按本表补齐
+双进程（center/worker）、Nacos 注册、mTLS、engine-proxy、APISIX、Kafka、Redis、ES、MinIO
+与 Prometheus/SkyWalking/Loki。模块边界如下：
 
 - 一个可执行单元 `share-app`（Spring Boot 3.2.5，Java 17），按域拆分为 7 个 Maven 模块（`share-auth/catalog/task/share/security/ops/agent`）+ `share-common`；
 - 各域**只依赖 `share-common`**，域间无编译期耦合：跨域读走共享库只读表（JdbcTemplate），跨域异步走 Spring 事件（审计/通知/交换指标）；
 - 这样既满足文档“代码按域分模块”的要求，又保留按域拆分成独立微服务的路径（替换 Repository 为 Feign/HTTP 即可，边界不变）。
 
-| 设计文档要求 | 本实现 | 演进路径 |
+| 设计文档要求 | 本实现 | 说明 |
 | --- | --- | --- |
-| Spring Cloud Alibaba + Nacos | 单进程内模块装配 | 按模块拆进程 + Nacos 注册 |
-| SeaTunnel / Flink CDC | `share-task` 内置轻量交换引擎（真实读数/映射/算子/脱敏/写目标） | `engine-proxy` 生成 SeaTunnel/Flink 作业配置 |
-| XXL-Job / DolphinScheduler | Spring `ThreadPoolTaskScheduler` + cron 表达式 | 替换为 XXL-Job 执行器 |
-| APISIX 网关 | 统一 `/api` 过滤器链（JWT 鉴权、权限拦截、TraceId、CORS）+ 共享 API 路由与限流（应用内） | 路由配置下发 APISIX Admin API |
-| Kafka 事件总线 | Spring `ApplicationEvent`（进程内） | 抽换为 Kafka topic：审计/指标/通知 |
-| MySQL / Redis / ES / MinIO | H2（MySQL 兼容模式）+ 本地文件区 | `application-mysql.yml` 切 MySQL；文件区换 MinIO；审计检索换 ES |
-| Prometheus/Grafana | Micrometer + `/actuator/prometheus` + 平台自建监控聚合 | 接入统一监控平台 |
+| Spring Cloud Alibaba + Nacos | `share-exchange-center`（8080，调度关闭）+ `share-exchange-worker`（8081，调度开启）双进程，OpenAPI 注册/心跳/下线到 Nacos | `SHARE_REGISTRY_NACOS_ENABLED=true`；`SHARE_SCHEDULER_ENABLED` 拆定时任务 |
+| 服务间 mTLS | 独立 8443 连接器，`clientAuth=need`，证书 `/opt/share-exchange/certs` | `SHARE_MTLS_ENABLED=true`；探针 `GET /api/mtls/ping` |
+| SeaTunnel / Flink CDC | `engine-proxy` 按批次生成 SeaTunnel HOCON / Flink SQL，落盘 `./data/engine-jobs`，回采 Flink REST 指标 | `POST /api/task/v1/engine/proxy/...`；`sw_batch` 记录引擎作业与指标 |
+| XXL-Job / DolphinScheduler | Spring `ThreadPoolTaskScheduler` + cron；调度仅在 worker 进程执行 | 生产可替换为 XXL-Job 执行器 |
+| APISIX 网关 | 共享 API 上下线/发布/回滚同步 APISIX 路由，插件 `jwt-auth`、`limit-req`、`prometheus`、`serverless-pre-function` | `SHARE_APISIX_ENABLED=true`；`/api/share/v1/gateway/apisix/status` |
+| Kafka 事件总线 | Spring 事件桥接 Kafka：`share.audit`、`share.exchange`、`share.notify`，消费端回写审计/指标/通知 | `SHARE_KAFKA_ENABLED=true` |
+| MySQL / Redis / ES / MinIO | MySQL 主从（只读事务走 3307 从库）、Redis 会话+限流、ES 审计检索、MinIO 文件对象化 | `MYSQL_REPLICA_ENABLED`、`SHARE_REDIS_ENABLED`、`SHARE_ES_ENABLED`、`SHARE_MINIO_ENABLED` |
+| Prometheus/Grafana/SkyWalking/Loki | Micrometer `/actuator/prometheus`、SkyWalking Java Agent（batchId 作为 span tag）、Loki 日志（loki profile） | `share_exchange_*` / `share_audit_*` 指标；Loki 标签 `app` |
 
 > H2 默认 `MODE=MySQL`，表结构与 SQL 尽量保持 MySQL 兼容；生产切换只需 `--spring.profiles.active=mysql`。
 

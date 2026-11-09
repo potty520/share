@@ -40,6 +40,35 @@ spring:
   web:
     resources:
       static-locations: classpath:/static/
+  data:
+    redis:
+      host: ${REDIS_HOST:127.0.0.1}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
+      timeout: 2s
+      connect-timeout: 2s
+      repositories:
+        enabled: false
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:127.0.0.1:9092}
+    client-id: ${KAFKA_CLIENT_ID:share-exchange}
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.apache.kafka.common.serialization.StringSerializer
+      acks: all
+      properties:
+        enable.idempotence: true
+    consumer:
+      group-id: ${KAFKA_CONSUMER_GROUP:share-exchange}
+      auto-offset-reset: earliest
+      enable-auto-commit: false
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+    listener:
+      ack-mode: record
+      missing-topics-fatal: false
+    admin:
+      fail-fast: false
 
 # ===== 平台自身配置 =====
 share:
@@ -60,6 +89,12 @@ share:
     max-rows-per-run: 200000
     retry-times: 3
     retry-interval-seconds: 10
+    proxy:
+      # seatunnel / flink；生成作业配置，外部提交开关关闭时由内置引擎执行
+      provider: ${SHARE_ENGINE_PROVIDER:seatunnel}
+      config-dir: ${SHARE_ENGINE_CONFIG_DIR:./data/engine-jobs}
+      flink-rest-url: ${FLINK_REST_URL:}
+      submit-enabled: ${SHARE_ENGINE_SUBMIT_ENABLED:false}
   security:
     password-min-length: 8
     # 敏感数据默认密级（4 级最高）
@@ -67,8 +102,89 @@ share:
   monitor:
     heartbeat-timeout-seconds: 90
     audit-retention-days: 180
+    # 审计清理模式：LOGICAL（逻辑删除，默认）/ ARCHIVE（CSV 归档后物理删除）/ PHYSICAL（直接物理删除）
+    audit-cleanup-mode: LOGICAL
+    audit-archive-dir: ./data/audit-archive
+  gateway:
+    # 集群级限流：基于数据库秒级窗口计数，多实例共享额度
+    cluster-rate-limit:
+      enabled: true
+    # 熔断器：窗口内失败达到阈值后打开，冷却后半开探测
+    circuit:
+      failure-threshold: 5
+      window-seconds: 60
+      open-seconds: 30
+    apisix:
+      enabled: ${SHARE_APISIX_ENABLED:false}
+      admin-url: ${APISIX_ADMIN_URL:http://127.0.0.1:9180}
+      admin-key: ${APISIX_ADMIN_KEY:share-apisix-admin-key}
+      upstream-host: ${SHARE_APISIX_UPSTREAM_HOST:127.0.0.1}
+      upstream-port: ${SHARE_APISIX_UPSTREAM_PORT:8080}
+      jwt-consumer: ${SHARE_APISIX_JWT_CONSUMER:share_platform}
+      jwt-secret: ${SHARE_JWT_SECRET:}
+  redis:
+    enabled: ${SHARE_REDIS_ENABLED:false}
+    rate-limit-enabled: ${SHARE_REDIS_RATE_LIMIT_ENABLED:true}
+    session-enabled: ${SHARE_REDIS_SESSION_ENABLED:true}
+  storage:
+    minio:
+      enabled: ${SHARE_MINIO_ENABLED:false}
+      endpoint: ${MINIO_ENDPOINT:http://127.0.0.1:9000}
+      access-key: ${MINIO_ACCESS_KEY:shareadmin}
+      secret-key: ${MINIO_SECRET_KEY:shareadmin123}
+      bucket: ${MINIO_BUCKET:share-files}
+    mysql:
+      replica:
+        enabled: ${MYSQL_REPLICA_ENABLED:false}
+        url: ${MYSQL_REPLICA_URL:jdbc:mysql://127.0.0.1:3307/share_exchange?useUnicode=true&characterEncoding=utf8&useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai}
+        username: ${MYSQL_REPLICA_USER:share}
+        password: ${MYSQL_REPLICA_PASSWORD:}
+        hikari:
+          maximum-pool-size: 12
+          minimum-idle: 2
+  search:
+    elasticsearch:
+      enabled: ${SHARE_ES_ENABLED:false}
+      url: ${ELASTICSEARCH_URL:http://127.0.0.1:9200}
+      index: ${ELASTICSEARCH_AUDIT_INDEX:share-audit}
+      username: ${ELASTICSEARCH_USERNAME:}
+      password: ${ELASTICSEARCH_PASSWORD:}
+  kafka:
+    enabled: ${SHARE_KAFKA_ENABLED:false}
+    topics:
+      audit: ${SHARE_KAFKA_TOPIC_AUDIT:share.audit}
+      exchange: ${SHARE_KAFKA_TOPIC_EXCHANGE:share.exchange}
+      notify: ${SHARE_KAFKA_TOPIC_NOTIFY:share.notify}
   seed:
     enabled: true
+  scheduler:
+    # 拆进程部署时：中心节点 false，worker 节点 true，避免定时任务重复执行
+    enabled: ${SHARE_SCHEDULER_ENABLED:true}
+  registry:
+    nacos:
+      enabled: ${SHARE_REGISTRY_NACOS_ENABLED:false}
+      server-addr: ${NACOS_SERVER_ADDR:127.0.0.1:8848}
+      service-name: ${SHARE_REGISTRY_NACOS_SERVICE_NAME:share-exchange-center}
+      group: ${NACOS_GROUP:DEFAULT_GROUP}
+      namespace: ${NACOS_NAMESPACE:}
+      username: ${NACOS_USERNAME:}
+      password: ${NACOS_PASSWORD:}
+      ip: ${SHARE_REGISTRY_NACOS_IP:}
+      cluster: ${NACOS_CLUSTER:DEFAULT}
+      role: ${SHARE_REGISTRY_NACOS_ROLE:center}
+  mtls:
+    enabled: ${SHARE_MTLS_ENABLED:false}
+    port: ${SHARE_MTLS_PORT:8443}
+    keystore: ${SHARE_MTLS_KEYSTORE:}
+    keystore-password: ${SHARE_MTLS_KEYSTORE_PASS:changeit}
+    truststore: ${SHARE_MTLS_TRUSTSTORE:}
+    truststore-password: ${SHARE_MTLS_TRUSTSTORE_PASS:changeit}
+  observability:
+    loki:
+      enabled: false
+      url: ${LOKI_URL:http://127.0.0.1:3100/loki/api/v1/push}
+    skywalking:
+      batch-tag: ${SHARE_SKYWALKING_BATCH_TAG:true}
 
 logging:
   level:

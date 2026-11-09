@@ -38,6 +38,7 @@ public class AuthFilter extends OncePerRequestFilter {
             "/api/auth/v1/mfa/verify",
             "/api/agent/v1/register",
             "/api/health",
+            "/api/mtls/",
             "/api/open/",
             "/actuator",
             "/v3/api-docs",

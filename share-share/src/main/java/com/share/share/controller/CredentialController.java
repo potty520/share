@@ -64,4 +64,13 @@ public class CredentialController {
                                               @RequestBody(required = false) GrantRevokeRequest req) {
         return Result.ok(credentialService.revoke(id, req == null ? null : req.reason()));
     }
+
+    /** 轮换密钥：返回新 AppSecret（仅一次），旧密钥在宽限期内继续可用。 */
+    @PostMapping("/{id}/rotate")
+    @RequirePermission(PermissionConstants.SHARE_WRITE)
+    @AuditLog(action = "CREDENTIAL_ROTATE", targetType = "CREDENTIAL", recordArgs = false)
+    public Result<Map<String, Object>> rotate(@PathVariable Long id,
+                                              @RequestParam(required = false) Integer graceHours) {
+        return Result.ok(credentialService.rotate(id, graceHours));
+    }
 }

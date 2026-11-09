@@ -25,14 +25,17 @@ public class JwtTokenUtil {
     private static final String CLAIM_DEPT = "dept";
     private static final String CLAIM_TOKEN_TYPE = "typ";
     private static final String CLAIM_MFA = "mfa";
+    private static final String CLAIM_KEY = "key";
 
     private final SecretKey key;
     private final long accessMinutes;
     private final long refreshDays;
+    private final String apisixKey;
 
     public JwtTokenUtil(@Value("${share.jwt.secret:share-exchange-platform-default-secret-key-2026-please-change}") String secret,
                         @Value("${share.jwt.access-minutes:15}") long accessMinutes,
-                        @Value("${share.jwt.refresh-days:7}") long refreshDays) {
+                        @Value("${share.jwt.refresh-days:7}") long refreshDays,
+                        @Value("${share.gateway.apisix.jwt-consumer:share_platform}") String apisixKey) {
         byte[] bytes = secret.getBytes(StandardCharsets.UTF_8);
         if (bytes.length < 32) {
             throw new IllegalStateException("share.jwt.secret 长度必须不小于 32 字节（HS256 要求）");
@@ -40,6 +43,7 @@ public class JwtTokenUtil {
         this.key = Keys.hmacShaKeyFor(bytes);
         this.accessMinutes = accessMinutes;
         this.refreshDays = refreshDays;
+        this.apisixKey = apisixKey;
     }
 
     public String createAccessToken(LoginUser user) {
@@ -64,6 +68,7 @@ public class JwtTokenUtil {
                 .claim(CLAIM_DEPT, user.getDeptId())
                 .claim(CLAIM_TOKEN_TYPE, type)
                 .claim(CLAIM_MFA, user.isMfaPassed())
+                .claim(CLAIM_KEY, apisixKey)
                 .issuedAt(Date.from(now))
                 .expiration(Date.from(expireAt))
                 .signWith(key)

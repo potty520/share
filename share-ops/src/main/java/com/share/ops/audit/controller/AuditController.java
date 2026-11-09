@@ -13,6 +13,7 @@ import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -32,6 +33,7 @@ import java.util.Map;
 public class AuditController {
 
     private final AuditService auditService;
+    private final com.share.ops.audit.service.ElasticsearchAuditService elasticsearchAuditService;
 
     /** 审计检索：operator/action/module/result/时间范围 + 关键词 */
     @GetMapping("/logs")
@@ -77,6 +79,22 @@ public class AuditController {
     @RequirePermission(PermissionConstants.AUDIT_READ)
     public Result<Map<String, Object>> anomalies() {
         return Result.ok(auditService.anomalies());
+    }
+
+    /** 手工触发审计日志保留期清理（mode=LOGICAL/ARCHIVE/PHYSICAL）。 */
+    @PostMapping("/retention/cleanup")
+    @RequirePermission(PermissionConstants.AUDIT_READ)
+    @AuditLog(action = "AUDIT_RETENTION_CLEANUP", targetType = "AUDIT")
+    public Result<Map<String, Object>> cleanupRetention(@RequestParam(required = false) Integer days,
+                                                        @RequestParam(required = false) String mode) {
+        return Result.ok(auditService.cleanupExpired(days, mode));
+    }
+
+    /** 审计检索后端状态（Elasticsearch / MySQL）。 */
+    @GetMapping("/search/status")
+    @RequirePermission(PermissionConstants.AUDIT_READ)
+    public Result<Map<String, Object>> searchStatus() {
+        return Result.ok(elasticsearchAuditService.status());
     }
 
     /** 审计报表导出（CSV，UTF-8 BOM 便于 Excel 直接打开） */

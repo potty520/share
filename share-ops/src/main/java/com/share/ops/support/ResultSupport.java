@@ -17,6 +17,11 @@ public final class ResultSupport {
         long total = body.get("total") == null ? list.size() : ((Number) body.get("total")).longValue();
         int pageNum = body.get("pageNum") == null ? 1 : ((Number) body.get("pageNum")).intValue();
         int pageSize = body.get("pageSize") == null ? 10 : ((Number) body.get("pageSize")).intValue();
-        return Result.ok(list, total, pageNum, pageSize);
+        Result<List<T>> result = Result.ok(list, total, pageNum, pageSize);
+        Object backend = body.get("backend");
+        if (backend != null && result.getPage() != null) {
+            result.getPage().setBackend(String.valueOf(backend));
+        }
+        return result;
     }
 }

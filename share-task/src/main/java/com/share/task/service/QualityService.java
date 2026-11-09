@@ -5,6 +5,8 @@ import com.share.common.event.NotifyEvent;
 import com.share.common.exception.BizException;
 import com.share.common.util.JsonUtil;
 import com.share.task.dto.QualityRuleRequest;
+import com.share.task.engine.DatabaseDialect;
+import com.share.task.engine.JdbcConnectionFactory;
 import com.share.task.engine.SourceReader;
 import com.share.task.engine.TargetWriter;
 import com.share.task.entity.TkQualityIssue;
@@ -16,6 +18,9 @@ import com.share.task.repository.TkQualityRuleRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.jdbc.core.ColumnMapRowMapper;
+import org.springframework.jdbc.core.ConnectionCallback;
+import org.springframework.jdbc.core.PreparedStatementCreator;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
@@ -24,6 +29,11 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
+import java.sql.Connection;
+import java.sql.DatabaseMetaData;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
+import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -48,6 +58,8 @@ public class QualityService {
     private final JdbcTemplate jdbcTemplate;
 
     private final TargetWriter targetWriter;
+
+    private final JdbcConnectionFactory jdbcConnectionFactory;
 
     private final ApplicationEventPublisher publisher;
 
@@ -129,28 +141,41 @@ public class QualityService {
             throw new BizException(ErrorCode.BAD_REQUEST, "规则未配置检核目标表");
         }
         SourceReader.validateIdentifier(table, "检核目标表");
-        if (!targetWriter.tableExists(table)) {
-            throw new BizException(ErrorCode.BAD_REQUEST, "检核目标表不存在：" + table);
+        JdbcTemplate dataJdbc = jdbcTemplate;
+        DatabaseDialect dialect;
+        if (rule.getTargetId() != null) {
+            JdbcConnectionFactory.JdbcEndpoint endpoint =
+                    jdbcConnectionFactory.resolve(rule.getTargetId(), "质量检核目标端");
+            dataJdbc = endpoint.jdbc();
+            dialect = endpoint.dialect();
+            if (!externalTableExists(dataJdbc, table)) {
+                throw new BizException(ErrorCode.BAD_REQUEST, "外部检核目标表不存在或不可访问：" + table);
+            }
+        } else {
+            if (!targetWriter.tableExists(table)) {
+                throw new BizException(ErrorCode.BAD_REQUEST, "检核目标表不存在：" + table);
+            }
+            dialect = DatabaseDialect.detect(jdbcTemplate);
         }
         long start = System.currentTimeMillis();
-        long totalRows = count("select count(*) from " + table);
+        long totalRows = count(dataJdbc, "select count(*) from " + table);
         long problemRows;
         String problemWhere;
         List<Map<String, Object>> samples = new ArrayList<>();
         switch (ruleType) {
             case "COMPLETENESS" -> {
                 String field = requireField(rule);
-                problemWhere = "(" + field + " is null or trim(cast(" + field + " as varchar(4000))) = '')";
-                problemRows = count("select count(*) from " + table + " where " + problemWhere);
-                samples = querySamples("select " + field + " as problem_value, count(*) as cnt from " + table
-                        + " where " + problemWhere + " group by " + field + " fetch first 10 rows only");
+                problemWhere = "(" + field + " is null or trim(" + dialect.castText(field) + ") = '')";
+                problemRows = count(dataJdbc, "select count(*) from " + table + " where " + problemWhere);
+                samples = querySamples(dataJdbc, "select " + field + " as problem_value, count(*) as cnt from " + table
+                        + " where " + problemWhere + " group by " + field, 10);
             }
             case "UNIQUENESS" -> {
                 String field = requireField(rule);
-                problemRows = count("select coalesce(sum(cnt), 0) from (select count(*) as cnt from " + table
+                problemRows = count(dataJdbc, "select coalesce(sum(cnt), 0) from (select count(*) as cnt from " + table
                         + " group by " + field + " having count(*) > 1) t");
-                samples = querySamples("select " + field + " as problem_value, count(*) as cnt from " + table
-                        + " group by " + field + " having count(*) > 1 order by count(*) desc fetch first 10 rows only");
+                samples = querySamples(dataJdbc, "select " + field + " as problem_value, count(*) as cnt from " + table
+                        + " group by " + field + " having count(*) > 1 order by count(*) desc", 10);
                 problemWhere = "重复值 " + field;
             }
             case "FORMAT" -> {
@@ -160,11 +185,11 @@ public class QualityService {
                     throw new BizException(ErrorCode.BAD_REQUEST, "规范性规则必须配置正则表达式 expression");
                 }
                 String escaped = regex.replace("'", "''");
-                problemWhere = "(" + field + " is not null and not regexp_like(cast(" + field
-                        + " as varchar(4000)), '" + escaped + "'))";
-                problemRows = count("select count(*) from " + table + " where " + problemWhere);
-                samples = querySamples("select " + field + " as problem_value, count(*) as cnt from " + table
-                        + " where " + problemWhere + " group by " + field + " fetch first 10 rows only");
+                problemWhere = "(" + field + " is not null and "
+                        + dialect.regexMismatch(field, escaped) + ")";
+                problemRows = count(dataJdbc, "select count(*) from " + table + " where " + problemWhere);
+                samples = querySamples(dataJdbc, "select " + field + " as problem_value, count(*) as cnt from " + table
+                        + " where " + problemWhere + " group by " + field, 10);
             }
             case "CONSISTENCY" -> {
                 String expression = rule.getExpression();
@@ -173,17 +198,17 @@ public class QualityService {
                 }
                 validateExpression(expression);
                 problemWhere = "not (" + expression + ")";
-                problemRows = count("select count(*) from " + table + " where " + problemWhere);
-                samples = querySamples("select * from " + table + " where " + problemWhere + " fetch first 10 rows only");
+                problemRows = count(dataJdbc, "select count(*) from " + table + " where " + problemWhere);
+                samples = querySamples(dataJdbc, "select * from " + table + " where " + problemWhere, 10);
             }
             case "TIMELINESS" -> {
                 String field = requireField(rule);
                 double allowedHours = rule.getThreshold() == null ? 24D : rule.getThreshold();
-                problemWhere = "(" + field + " is null or datediff('HOUR', cast(" + field
-                        + " as timestamp), current_timestamp) > " + (long) allowedHours + ")";
-                problemRows = count("select count(*) from " + table + " where " + problemWhere);
-                samples = querySamples("select " + field + " as problem_value, count(*) as cnt from " + table
-                        + " where " + problemWhere + " group by " + field + " fetch first 10 rows only");
+                problemWhere = "(" + field + " is null or "
+                        + dialect.overdueHours(field, (long) allowedHours) + ")";
+                problemRows = count(dataJdbc, "select count(*) from " + table + " where " + problemWhere);
+                samples = querySamples(dataJdbc, "select " + field + " as problem_value, count(*) as cnt from " + table
+                        + " where " + problemWhere + " group by " + field, 10);
             }
             default -> throw new BizException(ErrorCode.BAD_REQUEST, "不支持的质量规则类型：" + rule.getRuleType());
         }
@@ -198,6 +223,7 @@ public class QualityService {
         report.setRuleName(rule.getRuleName());
         report.setRuleType(ruleType);
         report.setTaskId(rule.getTaskId());
+        report.setTargetId(rule.getTargetId());
         report.setTargetTable(table);
         report.setTargetField(rule.getTargetField());
         report.setCheckTime(LocalDateTime.now());
@@ -210,6 +236,7 @@ public class QualityService {
         Map<String, Object> detail = new LinkedHashMap<>();
         detail.put("ruleType", ruleType);
         detail.put("targetTable", table);
+        detail.put("targetId", rule.getTargetId());
         detail.put("targetField", rule.getTargetField());
         detail.put("problemWhere", problemWhere);
         detail.put("problemRows", problemRows);
@@ -228,6 +255,7 @@ public class QualityService {
             issue.setRuleId(rule.getId());
             issue.setRuleName(rule.getRuleName());
             issue.setRuleType(ruleType);
+            issue.setTargetId(rule.getTargetId());
             issue.setTargetTable(table);
             issue.setTargetField(rule.getTargetField());
             issue.setIssueLevel(score >= 90 ? "LOW" : (score >= 70 ? "MEDIUM" : "HIGH"));
@@ -344,21 +372,51 @@ public class QualityService {
         };
     }
 
-    private long count(String sql) {
+    private long count(JdbcTemplate dataJdbc, String sql) {
         try {
-            Long value = jdbcTemplate.queryForObject(sql, Long.class);
+            Long value = dataJdbc.queryForObject(sql, Long.class);
             return value == null ? 0L : value;
         } catch (Exception e) {
             throw new BizException(ErrorCode.BAD_REQUEST, "质量检核 SQL 执行失败：" + e.getMessage());
         }
     }
 
-    private List<Map<String, Object>> querySamples(String sql) {
+    /** 通过 JDBC setMaxRows 限行，避免 fetch first / limit 的方言差异。 */
+    private List<Map<String, Object>> querySamples(JdbcTemplate dataJdbc, String sql, int limit) {
         try {
-            return jdbcTemplate.queryForList(sql);
+            PreparedStatementCreator creator = new PreparedStatementCreator() {
+                @Override
+                public PreparedStatement createPreparedStatement(Connection connection) throws SQLException {
+                    PreparedStatement statement = connection.prepareStatement(sql);
+                    statement.setMaxRows(limit);
+                    return statement;
+                }
+            };
+            return dataJdbc.query(creator, new ColumnMapRowMapper());
         } catch (Exception e) {
             log.warn("质量问题样例查询失败：{}", e.getMessage());
             return new ArrayList<>();
+        }
+    }
+
+    /** 外部目标表是否存在：走 JDBC 元数据，兼容不同数据库的大小写规则。 */
+    private boolean externalTableExists(JdbcTemplate dataJdbc, String table) {
+        try {
+            return Boolean.TRUE.equals(dataJdbc.execute((ConnectionCallback<Boolean>) connection -> {
+                DatabaseMetaData meta = connection.getMetaData();
+                for (String candidate : List.of(table, table.toLowerCase(), table.toUpperCase())) {
+                    try (ResultSet tables = meta.getTables(connection.getCatalog(), null, candidate,
+                            new String[]{"TABLE"})) {
+                        if (tables.next()) {
+                            return true;
+                        }
+                    }
+                }
+                return false;
+            }));
+        } catch (Exception e) {
+            log.warn("外部检核目标表探测失败：{}", e.getMessage());
+            return false;
         }
     }
 
@@ -412,6 +470,7 @@ public class QualityService {
         if (request.getTaskId() != null) {
             rule.setTaskId(request.getTaskId());
         }
+        rule.setTargetId(request.getTargetId());
         if (request.getTargetTable() != null) {
             rule.setTargetTable(request.getTargetTable().trim());
         }

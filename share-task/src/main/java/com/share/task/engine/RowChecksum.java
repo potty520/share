@@ -68,7 +68,16 @@ public final class RowChecksum {
             return localDate.toString();
         }
         if (value instanceof java.time.LocalDateTime localDateTime) {
-            return localDateTime.toLocalDate().toString();
+            return localDateTime.toString();
+        }
+        if (value instanceof java.sql.Timestamp timestamp) {
+            return timestamp.toLocalDateTime().toString();
+        }
+        if (value instanceof java.sql.Date sqlDate) {
+            return sqlDate.toLocalDate().toString();
+        }
+        if (value instanceof java.time.OffsetDateTime offsetDateTime) {
+            return offsetDateTime.toLocalDateTime().toString();
         }
         return value.toString();
     }

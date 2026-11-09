@@ -93,7 +93,8 @@ public class ShareCredentialService {
                 ? req.grantLevel() : Math.max(1, crossDomainQueryService.catalogLevel(api.getCatalogId()));
         IssuedCredential issued = doIssue(api, req.consumerId(),
                 req.consumerName() == null ? "consumer" : req.consumerName(),
-                grantLevel, LocalDateTime.now().plusDays(expireDays), null, null, req.remark());
+                grantLevel, LocalDateTime.now().plusDays(expireDays), null, null, req.remark(),
+                req.ipWhitelist(), req.ipBlacklist());
         Map<String, Object> data = toResponse(issued);
         data.put("expireDays", expireDays);
         return data;
@@ -104,11 +105,13 @@ public class ShareCredentialService {
     public IssuedCredential issueForGrant(ShareApi api, Long consumerId, String consumerName,
                                           int grantLevel, LocalDateTime expireTime,
                                           Long grantId, Long applyId) {
-        return doIssue(api, consumerId, consumerName, grantLevel, expireTime, grantId, applyId, "审批通过自动签发");
+        return doIssue(api, consumerId, consumerName, grantLevel, expireTime, grantId, applyId,
+                "审批通过自动签发", null, null);
     }
 
     private IssuedCredential doIssue(ShareApi api, Long consumerId, String consumerName, int grantLevel,
-                                     LocalDateTime expireTime, Long grantId, Long applyId, String remark) {
+                                     LocalDateTime expireTime, Long grantId, Long applyId, String remark,
+                                     String ipWhitelist, String ipBlacklist) {
         String appKey = generateAppKey();
         String appSecret = "SK" + IdGen.secret(30);
         ShareCredential credential = new ShareCredential();
@@ -123,6 +126,8 @@ public class ShareCredentialService {
                 + appSecret.substring(appSecret.length() - 4));
         credential.setGrantLevel(Math.max(grantLevel, 1));
         credential.setQpsLimit(api.getQpsLimit() == null ? 100 : api.getQpsLimit());
+        credential.setIpWhitelist(ShareUtils.truncate(ipWhitelist, 2000));
+        credential.setIpBlacklist(ShareUtils.truncate(ipBlacklist, 2000));
         credential.setStatus(ShareConstants.CRED_ACTIVE);
         credential.setExpireTime(expireTime);
         credential.setCallCount(0L);
@@ -160,6 +165,35 @@ public class ShareCredentialService {
     }
 
     /** 吊销凭据。 */
+    /**
+     * 密钥轮换：生成新 AppSecret 并立即生效，旧密钥保留宽限期（默认 24 小时）供平滑切换。
+     * <p>返回的明文 AppSecret 仅本次可见；宽限期结束后旧密钥自动失效。</p>
+     */
+    @Transactional
+    public Map<String, Object> rotate(Long id, Integer graceHours) {
+        ShareCredential credential = findOrThrow(id);
+        if (!ShareConstants.CRED_ACTIVE.equals(credential.getStatus())) {
+            throw new BizException(ErrorCode.CONFLICT, "仅 ACTIVE 状态凭据可以轮换密钥");
+        }
+        int grace = graceHours == null || graceHours <= 0 ? 24 : Math.min(graceHours, 168);
+        String newSecret = "SK" + IdGen.secret(30);
+        credential.setPrevAppSecretHash(credential.getAppSecretHash());
+        credential.setPrevAppSecretPreview(credential.getAppSecretPreview());
+        credential.setPrevSecretExpireTime(LocalDateTime.now().plusHours(grace));
+        credential.setAppSecretHash(sha256(newSecret));
+        credential.setAppSecretPreview(newSecret.substring(0, 4) + "****"
+                + newSecret.substring(newSecret.length() - 4));
+        credential.setSecretRotatedAt(LocalDateTime.now());
+        credentialRepository.save(credential);
+        log.info("轮换共享调用凭据密钥 id={} appKey={} 旧密钥宽限 {} 小时", id, credential.getAppKey(), grace);
+
+        Map<String, Object> data = toSafeMap(credential);
+        data.put("appSecret", newSecret);
+        data.put("prevSecretExpireTime", credential.getPrevSecretExpireTime());
+        data.put("secretNotice", "新 AppSecret 仅本次响应返回；旧密钥在宽限期内仍可调用，到期自动失效");
+        return data;
+    }
+
     @Transactional
     public Map<String, Object> revoke(Long id, String reason) {
         ShareCredential credential = credentialRepository.findByIdAndDeletedFalse(id)
@@ -246,9 +280,14 @@ public class ShareCredentialService {
         if (!ShareConstants.CRED_ACTIVE.equals(credential.getStatus())) {
             throw new BizException(ErrorCode.SHARE_CREDENTIAL_INVALID, "凭据状态不可用: " + credential.getStatus());
         }
-        String expected = credential.getAppSecretHash();
-        boolean matched = expected != null && MessageDigest.isEqual(
-                expected.getBytes(StandardCharsets.UTF_8), sha256(appSecret).getBytes(StandardCharsets.UTF_8));
+        String digest = sha256(appSecret);
+        boolean matched = hashEquals(credential.getAppSecretHash(), digest);
+        if (!matched && credential.getPrevAppSecretHash() != null
+                && (credential.getPrevSecretExpireTime() == null
+                || credential.getPrevSecretExpireTime().isAfter(LocalDateTime.now()))) {
+            // 密钥轮换宽限期：旧密钥仍可使用
+            matched = hashEquals(credential.getPrevAppSecretHash(), digest);
+        }
         if (!matched) {
             throw new BizException(ErrorCode.SHARE_CREDENTIAL_INVALID, "AppSecret 校验失败");
         }
@@ -281,12 +320,17 @@ public class ShareCredentialService {
         data.put("appSecretPreview", c.getAppSecretPreview());
         data.put("grantLevel", c.getGrantLevel());
         data.put("qpsLimit", c.getQpsLimit());
+        data.put("ipWhitelist", c.getIpWhitelist());
+        data.put("ipBlacklist", c.getIpBlacklist());
         data.put("status", c.getStatus());
         data.put("expireTime", c.getExpireTime());
         data.put("revokeTime", c.getRevokeTime());
         data.put("revokeReason", c.getRevokeReason());
         data.put("lastCallTime", c.getLastCallTime());
         data.put("callCount", c.getCallCount());
+        data.put("prevAppSecretPreview", c.getPrevAppSecretPreview());
+        data.put("prevSecretExpireTime", c.getPrevSecretExpireTime());
+        data.put("secretRotatedAt", c.getSecretRotatedAt());
         data.put("applyId", c.getApplyId());
         data.put("grantId", c.getGrantId());
         data.put("createTime", c.getCreateTime());
@@ -310,5 +354,10 @@ public class ShareCredentialService {
         } catch (Exception e) {
             throw new IllegalStateException("摘要计算失败", e);
         }
+    }
+
+    private boolean hashEquals(String expected, String actual) {
+        return expected != null && actual != null && MessageDigest.isEqual(
+                expected.getBytes(StandardCharsets.UTF_8), actual.getBytes(StandardCharsets.UTF_8));
     }
 }

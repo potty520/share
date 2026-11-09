@@ -108,6 +108,7 @@ public class TaskService {
         }
         TkTask task = new TkTask();
         applyRequest(task, request);
+        validateDefinition(task);
         task.setStatus(request.getStatus() == null || request.getStatus().isBlank() ? "DRAFT" : request.getStatus());
         if (task.getEnabled() == null) {
             task.setEnabled(Boolean.TRUE);
@@ -131,6 +132,7 @@ public class TaskService {
             throw new BizException(ErrorCode.CONFLICT, "任务编码已存在：" + request.getTaskCode());
         }
         applyRequest(task, request);
+        validateDefinition(task);
         task = taskRepository.save(task);
         saveVersion(task, "UPDATE", request.getChangeNote());
         return detail(task.getId());
@@ -317,6 +319,12 @@ public class TaskService {
         if (request.getSourceId() != null) {
             task.setSourceId(request.getSourceId());
         }
+        if (request.getSourceIncrementColumn() != null) {
+            task.setSourceIncrementColumn(blankToNull(request.getSourceIncrementColumn()));
+        }
+        if (request.getSourceIncrementStart() != null) {
+            task.setSourceIncrementStart(blankToNull(request.getSourceIncrementStart()));
+        }
         if (request.getSourceName() != null) {
             task.setSourceName(request.getSourceName());
         }
@@ -334,6 +342,9 @@ public class TaskService {
         }
         if (request.getTargetTable() != null) {
             task.setTargetTable(request.getTargetTable());
+        }
+        if (request.getTargetId() != null) {
+            task.setTargetId(request.getTargetId());
         }
         if (request.getTargetFilePath() != null) {
             task.setTargetFilePath(request.getTargetFilePath());
@@ -379,6 +390,37 @@ public class TaskService {
         if (task.getTargetType() == null || task.getTargetType().isBlank()) {
             task.setTargetType(SourceReader.resolveTargetType(task));
         }
+    }
+
+    /** 在落库前校验外部 JDBC 任务是否具备必要配置。 */
+    private void validateDefinition(TkTask task) {
+        if ("JDBC_TABLE".equalsIgnoreCase(task.getSourceType())) {
+            if (task.getSourceId() == null) {
+                throw new BizException(ErrorCode.BAD_REQUEST, "外部 JDBC 源端必须选择数据源");
+            }
+            if (task.getSourceTable() == null || task.getSourceTable().isBlank()) {
+                throw new BizException(ErrorCode.BAD_REQUEST, "外部 JDBC 源端必须填写源表名");
+            }
+        }
+        if ("JDBC_TABLE".equalsIgnoreCase(task.getTargetType())) {
+            if (task.getTargetId() == null) {
+                throw new BizException(ErrorCode.BAD_REQUEST, "外部 JDBC 目标端必须选择数据源");
+            }
+            if (task.getTargetTable() == null || task.getTargetTable().isBlank()) {
+                throw new BizException(ErrorCode.BAD_REQUEST, "外部 JDBC 目标端必须填写目标表名");
+            }
+        }
+        if ("INCREMENT".equalsIgnoreCase(task.getTaskType())
+                && !"CSV_FILE".equalsIgnoreCase(task.getSourceType())) {
+            if (task.getSourceIncrementColumn() == null || task.getSourceIncrementColumn().isBlank()) {
+                throw new BizException(ErrorCode.BAD_REQUEST, "增量任务必须配置 sourceIncrementColumn（时间戳或自增字段）");
+            }
+            SourceReader.validateIdentifier(task.getSourceIncrementColumn(), "增量字段");
+        }
+    }
+
+    private String blankToNull(String value) {
+        return value == null || value.isBlank() ? null : value.trim();
     }
 
     private TkTask requireTask(Long id) {

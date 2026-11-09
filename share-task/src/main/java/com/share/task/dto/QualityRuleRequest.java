@@ -16,6 +16,7 @@ public class QualityRuleRequest {
     private String ruleName;
     private String ruleType;
     private Long taskId;
+    private Long targetId;
     private String targetTable;
     private String targetField;
     private String expression;

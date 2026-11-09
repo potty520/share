@@ -18,12 +18,15 @@ public class TaskRequest {
     private String taskName;
     private String taskType;
     private Long sourceId;
+    private String sourceIncrementColumn;
+    private String sourceIncrementStart;
     private String sourceName;
     private String sourceType;
     private String sourceTable;
     private String sourceFilePath;
     private String targetType;
     private String targetTable;
+    private Long targetId;
     private String targetFilePath;
     private Long catalogId;
     private String filterCondition;

@@ -38,6 +38,10 @@
           <el-descriptions-item label="最近批次">{{ pick(detail, ['lastBatchId'], '-') }}</el-descriptions-item>
           <el-descriptions-item label="所属部门">{{ pick(detail, ['deptName'], '-') }}</el-descriptions-item>
           <el-descriptions-item label="创建人">{{ pick(detail, ['createBy', 'creatorName', 'operatorName'], '-') }}</el-descriptions-item>
+          <el-descriptions-item label="增量字段">
+            {{ pick(detail, ['sourceIncrementColumn'], '-') }}
+          </el-descriptions-item>
+          <el-descriptions-item label="当前水位">{{ pick(detail, ['lastWatermark'], '-') }}</el-descriptions-item>
           <el-descriptions-item label="任务描述" :span="3">{{ pick(detail, ['remark', 'description'], '暂无描述') }}</el-descriptions-item>
         </el-descriptions>
       </div>
@@ -282,7 +286,8 @@ const sourceOf = computed(() => {
 const targetOf = computed(() => {
   const d = detail.value || {}
   const path = pick(d, ['targetTable', 'targetFilePath'], '')
-  return path ? `${pick(d, ['targetType'], '')} ${path}` : pick(d, ['targetType'], '未配置')
+  const prefix = d.targetId ? `ds#${d.targetId}` : pick(d, ['targetType'], '')
+  return path ? `${prefix} ${path}` : (prefix || '未配置')
 })
 
 function statusText(v) {

@@ -100,4 +100,29 @@ public class ShareCredential extends BaseEntity {
     /** 备注 */
     @Column(name = "remark", length = 255)
     private String remark;
+
+    /** IP 白名单（逗号分隔，支持 CIDR；为空表示不限制来源 IP） */
+    @Column(name = "ip_whitelist", columnDefinition = "TEXT")
+    private String ipWhitelist;
+
+    /** IP 黑名单（逗号分隔，支持 CIDR；优先级高于白名单） */
+    @Column(name = "ip_blacklist", columnDefinition = "TEXT")
+    private String ipBlacklist;
+
+    /** 轮换前旧密钥摘要（宽限期内仍可用于调用） */
+    @com.fasterxml.jackson.annotation.JsonIgnore
+    @Column(name = "prev_app_secret_hash", length = 128)
+    private String prevAppSecretHash;
+
+    /** 轮换前旧密钥展示前缀 */
+    @Column(name = "prev_app_secret_preview", length = 32)
+    private String prevAppSecretPreview;
+
+    /** 旧密钥失效时间（轮换宽限期截止） */
+    @Column(name = "prev_secret_expire_time")
+    private LocalDateTime prevSecretExpireTime;
+
+    /** 最近一次密钥轮换时间 */
+    @Column(name = "secret_rotated_at")
+    private LocalDateTime secretRotatedAt;
 }

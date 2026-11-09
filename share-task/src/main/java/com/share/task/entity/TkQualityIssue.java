@@ -38,6 +38,10 @@ public class TkQualityIssue extends BaseEntity {
     @Column(name = "target_table", length = 128)
     private String targetTable;
 
+    /** 目标数据源 ID（为空表示平台内置库表） */
+    @Column(name = "target_id")
+    private Long targetId;
+
     /** 目标字段 */
     @Column(name = "target_field", length = 128)
     private String targetField;

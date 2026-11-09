@@ -34,6 +34,10 @@ public class TkQualityRule extends BaseEntity {
     @Column(name = "task_id")
     private Long taskId;
 
+    /** 目标数据源 ID（为空表示检核平台内置库表） */
+    @Column(name = "target_id")
+    private Long targetId;
+
     /** 检核目标表 */
     @Column(name = "target_table", length = 128)
     private String targetTable;

@@ -3,6 +3,7 @@ package com.share.auth.controller;
 import com.share.auth.dto.AuthRequests;
 import com.share.auth.dto.LoginResponse;
 import com.share.auth.service.AuthService;
+import com.share.auth.service.RedisSessionService;
 import com.share.common.api.Result;
 import com.share.common.audit.AuditAspect;
 import com.share.common.audit.AuditLog;
@@ -16,6 +17,8 @@ import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.util.Map;
+
 /**
  * 认证接口（FR-13）：登录 / 短信验证码 / 刷新 / 登出 / 个人中心 / 修改口令。
  * <p>login、sms-code、refresh 在 share-common 白名单内，无需令牌。</p>
@@ -26,6 +29,7 @@ import org.springframework.web.bind.annotation.RestController;
 public class AuthController {
 
     private final AuthService authService;
+    private final RedisSessionService redisSessionService;
 
     /** 登录：ADMIN/SECURITY 角色需短信验证码（先调 /sms-code 获取）。 */
     @PostMapping("/login")
@@ -71,6 +75,12 @@ public class AuthController {
     public Result<Void> changePassword(@Valid @RequestBody AuthRequests.PasswordChangeRequest request) {
         authService.changePassword(request.oldPassword(), request.newPassword());
         return Result.ok();
+    }
+
+    /** Redis 会话后端状态（集群登录态观测）。 */
+    @GetMapping("/sessions/status")
+    public Result<Map<String, Object>> sessionStatus() {
+        return Result.ok(redisSessionService.status());
     }
 
     private String extractToken(String authorization) {

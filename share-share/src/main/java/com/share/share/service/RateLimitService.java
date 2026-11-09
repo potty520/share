@@ -1,8 +1,13 @@
 package com.share.share.service;
 
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.data.redis.core.script.DefaultRedisScript;
 import org.springframework.stereotype.Service;
 
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -17,6 +22,23 @@ public class RateLimitService {
 
     private final Map<String, Bucket> buckets = new ConcurrentHashMap<>();
 
+    private final ObjectProvider<StringRedisTemplate> redisProvider;
+
+    @Value("${share.redis.enabled:false}")
+    private boolean redisEnabled;
+
+    @Value("${share.redis.rate-limit-enabled:true}")
+    private boolean redisRateLimitEnabled;
+
+    private static final DefaultRedisScript<Long> FIXED_WINDOW = new DefaultRedisScript<>(
+            "local n = redis.call('INCR', KEYS[1]); "
+                    + "if n == 1 then redis.call('PEXPIRE', KEYS[1], ARGV[2]) end; "
+                    + "return n", Long.class);
+
+    public RateLimitService(ObjectProvider<StringRedisTemplate> redisProvider) {
+        this.redisProvider = redisProvider;
+    }
+
     /**
      * 尝试获取一次调用许可。
      *
@@ -26,6 +48,17 @@ public class RateLimitService {
      */
     public boolean tryAcquire(String key, Integer qps) {
         int q = qps == null || qps <= 0 ? 1 : qps;
+        StringRedisTemplate redis = redis();
+        if (redis != null && key != null) {
+            try {
+                long window = System.currentTimeMillis() / 1000;
+                Long count = redis.execute(FIXED_WINDOW, List.of("share:rate:" + key + ":" + window),
+                        String.valueOf(q), "2000");
+                return count == null || count <= q;
+            } catch (Exception e) {
+                log.warn("Redis 限流失败，回退内存令牌桶：{}", e.getMessage());
+            }
+        }
         Bucket bucket = buckets.computeIfAbsent(key, k -> new Bucket(q));
         if (bucket.capacity != q) {
             // 限额调整后重建桶，避免历史令牌造成误放行
@@ -38,6 +71,21 @@ public class RateLimitService {
     /** 当前限流键数量（运维观测用）。 */
     public int bucketCount() {
         return buckets.size();
+    }
+
+    public String backend() {
+        return redis() == null ? "MEMORY" : "REDIS";
+    }
+
+    private StringRedisTemplate redis() {
+        if (!redisEnabled || !redisRateLimitEnabled) {
+            return null;
+        }
+        try {
+            return redisProvider.getIfAvailable();
+        } catch (Exception e) {
+            return null;
+        }
     }
 
     /** 令牌桶：容量 = qps，按 qps 个/秒匀速补充。 */

@@ -15,6 +15,7 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
 import org.springframework.data.jpa.domain.Specification;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
@@ -42,6 +43,13 @@ public class AuditService {
 
     private final AudOperationLogRepository logRepository;
     private final CrossDomainReader crossDomain;
+    private final ElasticsearchAuditService elasticsearchAuditService;
+
+    @Value("${share.monitor.audit-retention-days:180}")
+    private int defaultRetentionDays;
+
+    @Value("${share.monitor.audit-archive-dir:./data/audit-archive}")
+    private String archiveDir;
 
     // ================= 事件入库 =================
 
@@ -68,13 +76,92 @@ public class AuditService {
         entity.setCostMs(event.getCostMs());
         entity.setTraceId(event.getTraceId());
         entity.setOperateTime(event.getOperateTime() == null ? LocalDateTime.now() : event.getOperateTime());
-        return logRepository.save(entity);
+        AudOperationLog saved = logRepository.save(entity);
+        elasticsearchAuditService.index(saved);
+        return saved;
     }
 
     /** 供种子数据/系统内部直接补录审计日志 */
     @Transactional
     public AudOperationLog save(AudOperationLog entity) {
         return logRepository.save(entity);
+    }
+
+    /** 按保留天数逻辑删除过期审计日志，返回清理条数。 */
+    @Transactional
+    public Map<String, Object> cleanupExpired(Integer days) {
+        return cleanupExpired(days, "LOGICAL");
+    }
+
+    /**
+     * 按保留天数清理过期审计日志。
+     * <p>mode=LOGICAL 逻辑删除（默认，可检索追溯）；ARCHIVE 先导出 CSV 归档再做物理删除；
+     * PHYSICAL 直接物理删除（满足等保对审计留存的物理清理要求）。</p>
+     */
+    @Transactional
+    public Map<String, Object> cleanupExpired(Integer days, String mode) {
+        int retention = days == null || days <= 0 ? defaultRetentionDays : Math.min(days, 3650);
+        LocalDateTime cutoff = LocalDateTime.now().minusDays(Math.max(1, retention));
+        List<AudOperationLog> expired = logRepository.findByDeletedFalseAndOperateTimeBefore(cutoff);
+        String normalized = mode == null || mode.isBlank() ? "LOGICAL" : mode.trim().toUpperCase();
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("retentionDays", retention);
+        result.put("cutoff", cutoff);
+        result.put("matched", expired.size());
+        result.put("mode", normalized);
+        if ("PHYSICAL".equals(normalized) || "ARCHIVE".equals(normalized)) {
+            if ("ARCHIVE".equals(normalized) && !expired.isEmpty()) {
+                result.put("archiveFile", writeArchive(expired));
+            }
+            logRepository.deleteAll(expired);
+            result.put("deleted", expired.size());
+            result.put("physical", true);
+            log.info("审计日志物理清理完成：保留 {} 天，截止 {}，删除 {} 条，模式 {}", retention, cutoff,
+                    expired.size(), normalized);
+            return result;
+        }
+        for (AudOperationLog entry : expired) {
+            entry.setDeleted(true);
+        }
+        if (!expired.isEmpty()) {
+            logRepository.saveAll(expired);
+        }
+        result.put("deleted", expired.size());
+        result.put("physical", false);
+        log.info("审计日志保留期清理完成：保留 {} 天，截止 {}，清理 {} 条", retention, cutoff, expired.size());
+        return result;
+    }
+
+    /** 导出过期日志为 CSV 归档文件，返回绝对路径。 */
+    private String writeArchive(List<AudOperationLog> rows) {
+        try {
+            java.nio.file.Path dir = java.nio.file.Paths.get(archiveDir).toAbsolutePath().normalize();
+            java.nio.file.Files.createDirectories(dir);
+            String fileName = "audit-archive-" + LocalDateTime.now().format(
+                    java.time.format.DateTimeFormatter.ofPattern("yyyyMMddHHmmss")) + ".csv";
+            java.nio.file.Path file = dir.resolve(fileName);
+            StringBuilder sb = new StringBuilder();
+            sb.append("id,operatorName,roleCode,module,action,targetType,targetId,result,ip,uri,costMs,operateTime,detail\n");
+            for (AudOperationLog l : rows) {
+                sb.append(csvCell(l.getId() == null ? null : String.valueOf(l.getId()))).append(',')
+                        .append(csvCell(l.getOperatorName())).append(',')
+                        .append(csvCell(l.getRoleCode())).append(',')
+                        .append(csvCell(l.getModule())).append(',')
+                        .append(csvCell(l.getAction())).append(',')
+                        .append(csvCell(l.getTargetType())).append(',')
+                        .append(csvCell(l.getTargetId())).append(',')
+                        .append(csvCell(l.getResult())).append(',')
+                        .append(csvCell(l.getIp())).append(',')
+                        .append(csvCell(l.getUri())).append(',')
+                        .append(csvCell(l.getCostMs() == null ? null : String.valueOf(l.getCostMs()))).append(',')
+                        .append(csvCell(l.getOperateTime() == null ? null : l.getOperateTime().toString())).append(',')
+                        .append(csvCell(l.getDetail())).append('\n');
+            }
+            java.nio.file.Files.writeString(file, sb.toString(), java.nio.charset.StandardCharsets.UTF_8);
+            return file.toString();
+        } catch (Exception e) {
+            throw new BizException(ErrorCode.INTERNAL, "审计归档文件写入失败: " + e.getMessage());
+        }
     }
 
     // ================= 检索 =================
@@ -86,11 +173,27 @@ public class AuditService {
                                     Integer pageNum, Integer pageSize) {
         int pn = PageSupport.pageNum(pageNum);
         int ps = PageSupport.pageSize(pageSize);
+        if (elasticsearchAuditService.available()) {
+            ElasticsearchAuditService.SearchResult search = elasticsearchAuditService.search(
+                    operator, action, module, result, keyword, operatorId, minCostMs, from, to, pn, ps);
+            if (!search.fallback()) {
+                Map<String, Object> body = new LinkedHashMap<>();
+                body.put("list", search.items());
+                body.put("total", search.total());
+                body.put("pageNum", pn);
+                body.put("pageSize", ps);
+                body.put("pages", (search.total() + ps - 1) / ps);
+                body.put("backend", "ELASTICSEARCH");
+                return body;
+            }
+        }
         Specification<AudOperationLog> spec = buildSpec(operator, action, module, result, keyword,
                 operatorId, minCostMs, from, to);
         Page<AudOperationLog> page = logRepository.findAll(spec,
                 PageRequest.of(pn - 1, ps, Sort.by(Sort.Direction.DESC, "operateTime")));
-        return PageSupport.of(page, this::toView);
+        Map<String, Object> body = PageSupport.of(page, this::toView);
+        body.put("backend", "MYSQL");
+        return body;
     }
 
     @Transactional(readOnly = true)

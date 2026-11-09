@@ -11,6 +11,8 @@ import jakarta.validation.constraints.NotNull;
  * @param expireDays   有效天数，默认 90
  * @param grantLevel   授权密级（为空时取目录密级）
  * @param remark       备注
+ * @param ipWhitelist  IP 白名单（逗号分隔，支持 CIDR）
+ * @param ipBlacklist  IP 黑名单（逗号分隔，支持 CIDR）
  */
 public record CredentialCreateRequest(
         @NotNull(message = "apiId 不能为空") Long apiId,
@@ -18,5 +20,7 @@ public record CredentialCreateRequest(
         String consumerName,
         Integer expireDays,
         Integer grantLevel,
-        String remark) {
+        String remark,
+        String ipWhitelist,
+        String ipBlacklist) {
 }

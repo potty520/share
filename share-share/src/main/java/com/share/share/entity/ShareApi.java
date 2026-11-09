@@ -103,4 +103,32 @@ public class ShareApi extends BaseEntity {
     /** 网关路由配置 JSON（上线时生成，下线时置为禁用态） */
     @Column(name = "route_config", columnDefinition = "TEXT")
     private String routeConfig;
+
+    /** 对外 API 版本标签（请求头 X-Api-Version 可指定），默认 v1 */
+    @Column(name = "api_version", length = 20)
+    private String apiVersion = "v1";
+
+    /** 内部版本号，每次发布/回滚自增，用于版本快照排序 */
+    @Column(name = "version_no")
+    private Integer versionNo = 1;
+
+    /** 最近一次发布说明 */
+    @Column(name = "version_note", length = 255)
+    private String versionNote;
+
+    /** APISIX 路由 ID（同步成功后回写） */
+    @Column(name = "gateway_route_id", length = 128)
+    private String gatewayRouteId;
+
+    /** APISIX 同步状态：SYNCED / DISABLED / FAILED */
+    @Column(name = "gateway_sync_status", length = 32)
+    private String gatewaySyncStatus;
+
+    /** APISIX 最近同步时间 */
+    @Column(name = "gateway_sync_time")
+    private LocalDateTime gatewaySyncTime;
+
+    /** APISIX 最近同步错误 */
+    @Column(name = "gateway_error", length = 500)
+    private String gatewayError;
 }

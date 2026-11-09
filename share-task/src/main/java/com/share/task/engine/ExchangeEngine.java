@@ -6,6 +6,7 @@ import com.share.common.event.NotifyEvent;
 import com.share.common.exception.BizException;
 import com.share.common.util.IdGen;
 import com.share.common.util.JsonUtil;
+import com.share.common.web.TraceTagService;
 import com.share.task.dto.MappingRule;
 import com.share.task.dto.RunTicket;
 import com.share.task.dto.TransformResult;
@@ -38,7 +39,7 @@ import java.util.concurrent.ExecutorService;
  * 真实数据交换引擎（FR-02/04/05，模拟 SeaTunnel 但数据真实搬运）：
  * <ol>
  *   <li>异步执行：每次触发生成 instanceId + batchId，提交到独立线程池；</li>
- *   <li>读取源端（H2 表 / CSV）→ 字段映射 → 算子链 → 静态脱敏 → 写入目标（H2 表 / CSV）；</li>
+ *   <li>读取源端（内置表/外部 JDBC 表/CSV）→ 字段映射 → 算子链 → 静态脱敏 → 写入目标（内置表/外部 JDBC 表/CSV）；</li>
  *   <li>批次落 sw_batch、阶段落 sw_transfer_log、断点落 sw_checkpoint，进度按 5% 推进；</li>
  *   <li>失败按 share.engine.retry-times 指数退避重试；</li>
  *   <li>幂等：同一 batchId 目标端先删后写，批次已成功则跳过重复写入；</li>
@@ -61,9 +62,12 @@ public class ExchangeEngine {
     private final SwCheckpointRepository checkpointRepository;
     private final SourceReader sourceReader;
     private final TargetWriter targetWriter;
+    private final JdbcConnectionFactory jdbcConnectionFactory;
     private final TransformEngine transformEngine;
     private final RunningTaskRegistry runningTaskRegistry;
     private final EngineSettings settings;
+    private final EngineProxyService engineProxyService;
+    private final TraceTagService traceTagService;
     private final ApplicationEventPublisher publisher;
     private final JdbcTemplate jdbcTemplate;
     private final ExecutorService executor;
@@ -75,9 +79,12 @@ public class ExchangeEngine {
                           SwCheckpointRepository checkpointRepository,
                           SourceReader sourceReader,
                           TargetWriter targetWriter,
+                          JdbcConnectionFactory jdbcConnectionFactory,
                           TransformEngine transformEngine,
                           RunningTaskRegistry runningTaskRegistry,
                           EngineSettings settings,
+                          EngineProxyService engineProxyService,
+                          TraceTagService traceTagService,
                           ApplicationEventPublisher publisher,
                           JdbcTemplate jdbcTemplate,
                           @Qualifier("shareEngineExecutor") ExecutorService executor) {
@@ -88,9 +95,12 @@ public class ExchangeEngine {
         this.checkpointRepository = checkpointRepository;
         this.sourceReader = sourceReader;
         this.targetWriter = targetWriter;
+        this.jdbcConnectionFactory = jdbcConnectionFactory;
         this.transformEngine = transformEngine;
         this.runningTaskRegistry = runningTaskRegistry;
         this.settings = settings;
+        this.engineProxyService = engineProxyService;
+        this.traceTagService = traceTagService;
         this.publisher = publisher;
         this.jdbcTemplate = jdbcTemplate;
         this.executor = executor;
@@ -105,6 +115,7 @@ public class ExchangeEngine {
                     "任务【" + task.getTaskName() + "】正在运行，请勿重复触发");
         }
         String batchId = IdGen.batchId();
+        traceTagService.tag(TraceTagService.BATCH_ID, batchId);
         LocalDateTime now = LocalDateTime.now();
 
         TkTaskInstance instance = new TkTaskInstance();
@@ -134,6 +145,7 @@ public class ExchangeEngine {
         batch.setSourceType(SourceReader.resolveSourceType(task));
         batch.setTargetType(SourceReader.resolveTargetType(task));
         batch.setSourceId(task.getSourceId());
+        batch.setTargetId(task.getTargetId());
         batch.setTargetTable("CSV_FILE".equals(SourceReader.resolveTargetType(task))
                 ? TargetWriter.resolveTargetPath(task).toString() : task.getTargetTable());
         batch.setStatus(STATUS_RUNNING);
@@ -145,6 +157,7 @@ public class ExchangeEngine {
         batch.setOperatorId(operatorId);
         batch.setDeptId(task.getDeptId());
         batchRepository.save(batch);
+        engineProxyService.attachJob(task, batch);
 
         runningTaskRegistry.register(task.getId(), instance.getId());
 
@@ -170,6 +183,7 @@ public class ExchangeEngine {
 
     /** 指数退避重试执行。 */
     private void executeWithRetry(Long taskId, Long instanceId, String batchId) {
+        traceTagService.beginBatch(batchId);
         int maxRetry = Math.max(0, settings.getRetryTimes());
         try {
             for (int attempt = 0; attempt <= maxRetry; attempt++) {
@@ -206,6 +220,7 @@ public class ExchangeEngine {
             markFailed(taskId, instanceId, batchId, "引擎内部异常：" + fatal.getMessage(), 0L);
         } finally {
             runningTaskRegistry.unregister(taskId, instanceId);
+            traceTagService.endBatch();
         }
     }
 
@@ -278,7 +293,15 @@ public class ExchangeEngine {
         appendLog(task.getId(), instanceId, batchId, "VERIFY", "INFO",
                 "生成数据校验值：" + checksum + "，写入字节数约 " + bytes, (long) total, null, null);
         saveCheckpoint(task.getId(), batchId, total, transform.getColumns().size());
+        if ("INCREMENT".equalsIgnoreCase(task.getTaskType()) && sourceData.getWatermark() != null
+                && !sourceData.getWatermark().isBlank()) {
+            task.setLastWatermark(sourceData.getWatermark());
+            taskRepository.save(task);
+            appendLog(task.getId(), instanceId, batchId, "CHECKPOINT", "INFO",
+                    "增量水位已推进至 " + sourceData.getWatermark(), (long) total, null, null);
+        }
         long totalCost = System.currentTimeMillis() - totalStart;
+        instance.setReadRows((long) sourceData.getRows().size());
         markSuccess(instance, task, batch, writeResult.getWrittenRows(), checksum, bytes);
         batch.setCostMs(totalCost);
         batch.setEndTime(LocalDateTime.now());
@@ -434,6 +457,20 @@ public class ExchangeEngine {
                     actualChecksum = RowChecksum.of(columns, rows);
                     success = true;
                 }
+            } else if ("JDBC_TABLE".equalsIgnoreCase(batch.getTargetType())) {
+                String table = batch.getTargetTable();
+                SourceReader.validateIdentifier(table, "目标表名");
+                JdbcConnectionFactory.JdbcEndpoint endpoint =
+                        jdbcConnectionFactory.resolve(batch.getTargetId(), "目标端");
+                Long counted = endpoint.jdbc().queryForObject(
+                        "select count(*) from " + table + " where " + TargetWriter.BATCH_COLUMN + " = ?",
+                        Long.class, batch.getBatchId());
+                actualRows = counted == null ? 0 : counted;
+                List<Map<String, Object>> rows = endpoint.jdbc().queryForList(
+                        "select * from " + table + " where " + TargetWriter.BATCH_COLUMN + " = ? order by "
+                                + TargetWriter.ROW_COLUMN, batch.getBatchId());
+                actualChecksum = RowChecksum.of(columns, rows);
+                success = true;
             } else {
                 String table = batch.getTargetTable();
                 if (table == null || !targetWriter.tableExists(table)) {

@@ -47,6 +47,10 @@ public class SwBatch extends BaseEntity {
     @Column(name = "source_id")
     private Long sourceId;
 
+    /** 目标数据源 ID（外部 JDBC 目标） */
+    @Column(name = "target_id")
+    private Long targetId;
+
     /** 目标表名 / 文件路径 */
     @Column(name = "target_table", length = 500)
     private String targetTable;
@@ -106,4 +110,28 @@ public class SwBatch extends BaseEntity {
     /** 触发人用户 ID */
     @Column(name = "operator_id")
     private Long operatorId;
+
+    /** 执行引擎：LOCAL / SEATUNNEL / FLINK_CDC */
+    @Column(name = "engine_provider", length = 32)
+    private String engineProvider;
+
+    /** 外部引擎作业 ID（SeaTunnel jobId / Flink jobId） */
+    @Column(name = "engine_job_id", length = 128)
+    private String engineJobId;
+
+    /** 引擎代理生成的作业配置路径（本地文件） */
+    @Column(name = "engine_config_path", length = 600)
+    private String engineConfigPath;
+
+    /** 外部引擎状态：CREATED / SUBMITTED / RUNNING / FINISHED / FAILED / FALLBACK */
+    @Column(name = "engine_status", length = 32)
+    private String engineStatus;
+
+    /** 最近一次回采的引擎指标 JSON */
+    @Column(name = "engine_metrics_json", columnDefinition = "TEXT")
+    private String engineMetricsJson;
+
+    /** 指标最近回采时间 */
+    @Column(name = "engine_sync_time")
+    private LocalDateTime engineSyncTime;
 }

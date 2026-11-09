@@ -81,6 +81,9 @@ public class AgentService {
     @Value("${share.monitor.heartbeat-timeout-seconds:90}")
     private long heartbeatTimeoutSeconds;
 
+    @Value("${share.scheduler.enabled:true}")
+    private boolean schedulerEnabled;
+
     /** 文件落盘根目录 */
     @Value("${share.file.root:./data/files}")
     private String fileRoot;
@@ -536,6 +539,9 @@ public class AgentService {
      */
     @Scheduled(fixedDelay = 60000L)
     public void sweepOfflineNodes() {
+        if (!schedulerEnabled) {
+            return;
+        }
         try {
             long timeout = Math.max(30L, heartbeatTimeoutSeconds);
             for (AgNode node : nodeRepository.findByDeletedFalseOrderByIdAsc()) {

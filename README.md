@@ -36,15 +36,16 @@ scripts\start.cmd
 - 健康检查：<http://127.0.0.1:8080/api/health>
 
 ### 1.3 演示/生产环境（Rocky Linux + MySQL 8.4，已验证）
-虚拟机演示环境地址：**<http://192.168.116.128:8080/>**
+虚拟机演示环境地址：**<http://192.168.43.128:8080/>**（root / zkzj1024）
 
 | 项 | 值 |
 | --- | --- |
 | 操作系统 | Rocky Linux 10.2 x86_64（8C/15G/43G） |
 | 数据库 | MySQL Community Server 8.4.13（`share_exchange` 库） |
 | 运行时 | OpenJDK 21.0.13（应用 JDK17 编译，21 兼容运行） |
-| 部署方式 | `/opt/share-exchange` + systemd 服务 `share-exchange`（开机自启） |
-| 验证结果 | 建表 61 张、启动 0 DDL 错误、冒烟 **39/39 PASS** |
+| 部署方式 | `/opt/share-exchange` + systemd：`share-exchange`(8080) / `share-exchange-worker`(8081，调度) |
+| 中间件 | Redis 6379、Kafka 9092、MinIO 9000、ES 9200、Loki 3100、APISIX 9080/9180、SkyWalking 11800/12800、MySQL 从库 3307 |
+| 验证结果 | 启动 0 DDL 错误；冒烟 **39/39 PASS**，网关增强 **11/11 PASS**，mTLS/Nacos/Kafka/ES/MinIO/Loki 均已实测 |
 
 完整部署步骤、运维命令与 MySQL 适配修复记录见 [`docs/VM_DEPLOY.md`](docs/VM_DEPLOY.md)；
 可复现脚本见 `deploy/vm/`（环境探查 / 安装 JDK+MySQL / 初始化库 / 部署 systemd 服务）。
@@ -107,10 +108,11 @@ share-exchange/
 | 流程 | 实现位置 | 关键点 |
 | --- | --- | --- |
 | 共享申请审批闭环 | `share-share` | 多级节点（业务管理员→提供方→安全管理员，涉敏资源自动加节点）、通过后自动签发凭据与授权、到期提醒（T-7）与自动回收 |
-| 批量交换执行 | `share-task` | `batchId` 贯穿、字段映射/算子链/脱敏、目标端幂等、失败重试（指数退避）、行数与 MD5 核对、实例日志 |
-| 实时增量 | `share-task` | 增量模式（时间戳/自增字段条件抽取）+ 断点 checkpoint（`sw_checkpoint`） |
-| 共享 API 调用 | `share-share` + `/api/open/v1/{apiCode}` | AppKey/AppSecret 鉴权、按凭据 QPS 限流、动态脱敏、调用计量 |
-| 文件交换 | `share-ops` | 分片断点续传、MD5/SHA256 校验、目录监听与定时收发 |
+| 批量交换执行 | `share-task` | 源/目标支持平台内置表、外部 JDBC 表与 CSV；`batchId` 贯穿、字段映射/算子链/脱敏、目标端自动建表与幂等、失败重试（指数退避）、行数与 MD5 核对、实例日志 |
+| 实时增量 | `share-task` | 外部 JDBC 表按时间戳/自增字段增量抽取；批次成功后推进水位，失败不推进；支持 `sw_checkpoint` 断点记录 |
+| 共享 API 调用 | `share-share` + `/api/open/v1/{apiCode}` | AppKey/AppSecret 鉴权、IP 黑白名单（CIDR）、API 版本校验、熔断、数据库集群级限流 + 单机令牌桶、动态脱敏、调用计量 |
+| 质量检核 | `share-task` | 平台库与外部 JDBC 目标库检核；唯一性/完整性/格式/一致性/时效性；`checkCron` 定时调度；报告、问题工单与得分趋势 |
+| 文件交换 | `share-ops` | 分片断点续传、MD5/SHA256 校验、目录监听与定时收发；LOCAL/FTP/FTPS/SFTP 互传、GZIP 压缩、AES-256-GCM 加密、失败自动重试 |
 | 安全管控 | `share-security` | 1~4 级分类分级、6 类脱敏算法（遮蔽/替换/哈希/泛化/加扰/加密）、静态与动态双通道 |
 | 审计与监控 | `share-ops` | `@AuditLog` 切面 → 事件 → 审计库；批次事件 → 指标聚合 → 告警规则 → 通知 |
 
@@ -138,6 +140,24 @@ share-exchange/
 接口规范与字段约定见 [`docs/CONTRACT.md`](docs/CONTRACT.md)；在线文档见 `/swagger-ui.html`。
 
 ---
+
+### 2.4 已实测增强能力（2026-11）
+| 能力 | 实现 | 实测结果 |
+| --- | --- | --- |
+| 外部 JDBC 源/目标 | `JdbcConnectionFactory` + `SourceReader`/`TargetWriter` | 外部源全量 7 行、增量二次仅读 2 行；外部目标 7 行写入，核对 PASS |
+| 外部目标质量检核 | `QualityService` 按规则 `targetId` 切换连接 | `ext_orders_target` 唯一性 100 分、完整性 1 条空金额 |
+| 质量定时调度 | `QualityScheduler` | `*/10 * * * * ?` 规则自动执行成功 |
+| 审计保留清理 | `AuditService.cleanupExpired(days, mode)` | `LOGICAL`/`ARCHIVE`（CSV 归档后物理删除）/`PHYSICAL`；实测归档文件生成且库内记录物理删除 |
+| 网关 IP 黑白名单 | `IpAccessService`（精确 IP / 通配符 / CIDR v4+v6） | 白名单外 42406 拒绝、白名单内放行、黑名单优先拒绝 |
+| API 版本管理 | `shr_api_version` 快照 + 发布/回滚 | 上线自动快照 v1，手工发布 v2，回滚 v1 生成 v3 且配置恢复 |
+| 密钥轮换 | `ShareCredentialService.rotate` + 旧密钥宽限期 | 新密钥立即生效，旧密钥 24h 内可用，宽限期到点后 42403 拒绝 |
+| 网关熔断 | `CircuitBreakerService`（失败窗口/半开探测） | 连续 5 次查询失败后第 6 次返回 42405（HTTP 503），复位接口恢复 |
+| 集群级限流 | `ClusterRateLimitService`（`shr_gateway_rate` 秒级原子计数） | 与单机令牌桶双重校验，多实例共享同一额度 |
+| Prometheus 指标 | `micrometer-registry-prometheus` | `/actuator/prometheus` 返回 JVM/Logback 等真实指标 |
+| 文件远端传输 | `RemoteFileService`（JSch / Commons Net） | SFTP 上传下载、FTP 上传下载均实测成功，MD5 一致；GZIP 与 AES-GCM 组合可还原原文；不可达目标按配置重试 2 次后失败 |
+
+> 已打包驱动（本轮未做真实连通测试）：PostgreSQL 42.7.4、SQL Server 12.8.1.jre11、Oracle ojdbc11 23.5、ClickHouse 0.6.5。
+
 
 ## 4. 关键设计说明
 
@@ -177,7 +197,9 @@ share-exchange/
 | `share.crypto.key` | 敏感字段加密主密钥（生产用 `SHARE_CRYPTO_KEY` 或 KMS） |
 | `share.file.root` | 文件交换存储根目录（默认 `./data/files`） |
 | `share.engine.*` | 交换引擎批次大小、重试次数与间隔、单次最大行数 |
-| `share.monitor.*` | 心跳超时阈值、审计保留天数 |
+| `share.monitor.*` | 心跳超时阈值、审计保留天数、清理模式（LOGICAL/ARCHIVE/PHYSICAL）、归档目录 |
+| `share.gateway.cluster-rate-limit.enabled` | 是否启用数据库集群级限流 |
+| `share.gateway.circuit.*` | 熔断失败阈值、统计窗口、冷却时间 |
 | `share.seed.enabled` | 是否初始化演示数据 |
 
 生产（MySQL）配置见 `application-mysql.yml` 与 `docs/DEPLOY.md`。
@@ -192,6 +214,7 @@ share-exchange/
 | 端到端演示 | 门户按角色走：编目→审核→申请→审批→授权→开放 API 调用→审计追踪 |
 | 一致性 | 任务实例详情中的行数/MD5 核对结果；`/api/task/v1/instances/{id}/verify` |
 | 审计闭环 | 任意写操作后在“安全审计”检索到操作记录与数据流转链路 |
+| 网关增强 | IP 黑白名单、版本发布/回滚、密钥轮换宽限期、熔断与集群限流（见 `scripts/gateway-test.mjs`） |
 
 ---
 
@@ -199,7 +222,7 @@ share-exchange/
 
 1. 服务拆分：按模块边界拆为独立进程，注册 Nacos，服务间 mTLS；
 2. 引擎替换：`engine-proxy` 生成 SeaTunnel/Flink CDC 作业并回收指标；
-3. 网关替换：共享 API 路由下发 APISIX（jwt-auth/limit-req/prometheus/serverless 插件）；
+3. 网关替换：当前内置网关已覆盖 IP ACL、版本校验、熔断与集群限流；生产可平滑替换为 APISIX（jwt-auth/limit-req/prometheus/serverless 插件）；
 4. 存储替换：MySQL 主从、Redis 会话与限流、Kafka 事件总线、Elasticsearch 检索与审计、MinIO 对象存储；
 5. 可观测性：Micrometer → Prometheus、SkyWalking（batchId 作为追踪标签）、Loki 日志。
 

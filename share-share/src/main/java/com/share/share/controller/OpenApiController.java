@@ -39,13 +39,14 @@ public class OpenApiController {
     public ResponseEntity<Result<Map<String, Object>>> get(@PathVariable String apiCode,
                                                            @RequestHeader(value = "X-App-Key", required = false) String appKey,
                                                            @RequestHeader(value = "X-App-Secret", required = false) String appSecret,
+                                                           @RequestHeader(value = "X-Api-Version", required = false) String apiVersion,
                                                            @RequestParam(required = false) Map<String, String> query,
                                                            HttpServletRequest request) {
         Map<String, Object> params = new LinkedHashMap<>();
         if (query != null) {
             params.putAll(query);
         }
-        return invoke(apiCode, params, appKey, appSecret, request);
+        return invoke(apiCode, params, appKey, appSecret, apiVersion, request);
     }
 
     /** POST 方式开放调用，参数放在 JSON body（同样支持 pageNum/pageSize）。 */
@@ -53,27 +54,33 @@ public class OpenApiController {
     public ResponseEntity<Result<Map<String, Object>>> post(@PathVariable String apiCode,
                                                             @RequestHeader(value = "X-App-Key", required = false) String appKey,
                                                             @RequestHeader(value = "X-App-Secret", required = false) String appSecret,
+                                                            @RequestHeader(value = "X-Api-Version", required = false) String apiVersion,
                                                             @RequestBody(required = false) Map<String, Object> body,
                                                             HttpServletRequest request) {
         Map<String, Object> params = body == null ? new LinkedHashMap<>() : new LinkedHashMap<>(body);
-        return invoke(apiCode, params, appKey, appSecret, request);
+        return invoke(apiCode, params, appKey, appSecret, apiVersion, request);
     }
 
     private ResponseEntity<Result<Map<String, Object>>> invoke(String apiCode, Map<String, Object> params,
                                                                String appKey, String appSecret,
+                                                               String apiVersion,
                                                                HttpServletRequest request) {
         int pageNum = takeInt(params, "pageNum", 1);
         int pageSize = takeInt(params, "pageSize", 10);
         String ip = AuditAspect.clientIp(request);
         try {
             Map<String, Object> data = openApiService.invoke(apiCode, params, pageNum, pageSize,
-                    appKey, appSecret, ip);
+                    appKey, appSecret, apiVersion, ip);
             long total = data.get("total") instanceof Number n ? n.longValue() : 0L;
             return ResponseEntity.ok(Result.ok(data, total, pageNum, pageSize));
         } catch (BizException e) {
             if (e.getCode() == ErrorCode.SHARE_QPS_LIMITED.getCode()) {
                 // 限流语义要求 HTTP 429
                 return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
+                        .body(Result.fail(e.getCode(), e.getMessage()));
+            }
+            if (e.getCode() == ErrorCode.SHARE_API_CIRCUIT_OPEN.getCode()) {
+                return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
                         .body(Result.fail(e.getCode(), e.getMessage()));
             }
             return ResponseEntity.ok(Result.fail(e.getCode(), e.getMessage()));
