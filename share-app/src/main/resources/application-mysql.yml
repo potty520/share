@@ -32,6 +32,10 @@ share:
     root: ${SHARE_FILE_ROOT:/data/share/files}
   seed:
     enabled: ${SHARE_SEED_ENABLED:false}
+  auth:
+    captcha:
+      # 生产环境验证码只以图片形式返回，禁止明文回传（联调需显式打开环境变量）
+      expose-code: ${SHARE_CAPTCHA_EXPOSE_CODE:false}
 
 logging:
   level:

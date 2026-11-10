@@ -273,17 +273,17 @@ public class TaskSeedRunner implements CommandLineRunner {
                 "H2_TABLE", "tk_demo_enterprise", null,
                 "H2_TABLE", "tgt_enterprise_info", null,
                 enterpriseMapping(), enterpriseOperators(), null, null,
-                2L, "市税务局", "全量抽取企业基础信息，手机号静态脱敏后写入平台库表");
+                2L, "财务部", "全量抽取企业基础信息，手机号静态脱敏后写入平台库表");
         TkTask socialTask = createTask("TASK-SOCIAL-INC", "社保参保增量同步", "INCREMENT",
                 "H2_TABLE", "tk_demo_social", null,
                 "H2_TABLE", "tgt_social_security", null,
                 socialMapping(), socialOperators(), null, null,
-                4L, "市人社局", "按参保状态过滤的增量同步，身份证号脱敏、缴费月份标准化");
+                4L, "人力资源部", "按参保状态过滤的增量同步，身份证号脱敏、缴费月份标准化");
         TkTask creditTask = createTask("TASK-CREDIT-CRON", "信用信息定时归集", "FULL",
                 "H2_TABLE", "tk_demo_credit", null,
                 "CSV_FILE", null, "data/exchange/target/credit_info.csv",
                 creditMapping(), creditOperators(), null, "0 0/30 * * * ?",
-                3L, "市市场监管局", "每 30 分钟归集一次信用评价结果，落盘为 CSV 供前置节点摆渡");
+                3L, "运营管理部", "每 30 分钟归集一次信用评价结果，落盘为 CSV 供前置节点摆渡");
         creditTask.setStatus("READY");
         taskRepository.save(creditTask);
 

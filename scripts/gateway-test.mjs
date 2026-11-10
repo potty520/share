@@ -30,12 +30,17 @@ async function issue(apiId, name, ipWhitelist, ipBlacklist) {
   return r.json.data
 }
 
-const sms = await api('POST', '/api/auth/v1/sms-code', { username: 'admin' })
+const cap = await api('GET', '/api/auth/v1/captcha')
+const captcha = cap.json.data || {}
 const login = await api('POST', '/api/auth/v1/login', {
-  username: 'admin', password: '123456', smsCode: sms.json.data?.code || sms.json.data?.smsCode
+  username: 'admin', password: '123456',
+  captchaId: captcha.captchaId, captchaCode: captcha.code
 })
 token = login.json.data?.accessToken
-if (!token) throw new Error('登录失败: ' + JSON.stringify(login.json))
+if (!token) {
+  throw new Error('登录失败: ' + JSON.stringify(login.json)
+    + (captcha.code ? '' : '（图形验证码未明文返回，请以 SHARE_CAPTCHA_EXPOSE_CODE=true 或 SHARE_CAPTCHA_ENABLED=false 启动后重试）'))
+}
 
 const ts = Date.now().toString().slice(-6)
 const tmpCode = 'TMP_GW_' + ts

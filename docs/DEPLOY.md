@@ -99,7 +99,7 @@ WantedBy=multi-user.target
 ```nginx
 server {
   listen 443 ssl http2;
-  server_name share.example.gov.cn;
+  server_name share.example.com;
   ssl_certificate     /etc/nginx/ssl/share.crt;
   ssl_certificate_key /etc/nginx/ssl/share.key;
   ssl_protocols TLSv1.2 TLSv1.3;
@@ -159,7 +159,7 @@ server {
 | --- | --- |
 | 启动报 `Table not found` | 确认 `spring.jpa.hibernate.ddl-auto=update` 或已执行 DDL |
 | 登录返回 40100 | 令牌过期（access 15min）；前端会自动用 refresh 或跳登录 |
-| 登录返回 41104 | 该角色需短信验证码：先调 `/api/auth/v1/sms-code` |
+| 登录返回 41106/41107 | 图形验证码缺失或不正确：先调 `GET /api/auth/v1/captcha` 取图，随登录请求带上 `captchaId`/`captchaCode`（无效后需刷新） |
 | 交换任务实例 FAILED | 查看实例日志与 `sw_transfer_log`；核对源表/文件路径与字段映射 |
 | 开放 API 401/403 | 校验 `X-App-Key`、`X-App-Secret` 与凭据状态；确认 API 已上线 |
 | 页面刷新 404 | 确认静态资源已打包（SPA 回退由 `SpaWebConfig` 处理），jar 内含 static/index.html |

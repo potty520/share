@@ -64,7 +64,7 @@ public class SecuritySeedRunner implements CommandLineRunner {
         SecClassifyTemplate template = new SecClassifyTemplate();
         template.setTemplateCode("CLASSIFY-GENERAL");
         template.setTemplateName("通用数据分类分级模板");
-        template.setDescription("政务共享数据四级分类分级：公开 / 内部 / 敏感 / 核心，分级结果作为审批与脱敏依据");
+        template.setDescription("共享数据四级分类分级：公开 / 内部 / 敏感 / 核心，分级结果作为审批与脱敏依据");
         template.setLevelDefs("["
                 + "{\"level\":1,\"name\":\"公开\",\"color\":\"#67C23A\",\"description\":\"可对社会公开的数据\"},"
                 + "{\"level\":2,\"name\":\"内部\",\"color\":\"#409EFF\",\"description\":\"部门内部共享的数据\"},"

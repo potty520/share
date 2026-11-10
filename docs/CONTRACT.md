@@ -51,7 +51,7 @@
 - 登录后 `Authorization: Bearer <accessToken>`；access 15 分钟、refresh 7 天
 - 接口权限用 `@RequirePermission(PermissionConstants.X)`，ADMIN 自动放行
 - 当前用户：`UserContext.get()`；操作审计用 `@AuditLog(action="…", targetType="…")`
-- 白名单：`/api/auth/v1/login|refresh|captcha|sms-code|mfa/verify`、`/api/agent/v1/register`、`/api/open/**`、`/api/health`
+- 白名单：`/api/auth/v1/login|refresh|captcha|mfa/verify`、`/api/agent/v1/register`、`/api/open/**`、`/api/health`
 
 ### 1.3 分页与命名
 - 查询参数：`pageNum`（默认 1）、`pageSize`（默认 10）、业务过滤参数
@@ -78,7 +78,8 @@
 ### 2.1 share-auth（FR-13）
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
-| POST | `/api/auth/v1/login` | 入参 `{username,password,smsCode?}`；返回 `{accessToken,refreshToken,expiresIn,user:{id,username,realName,roleCode,deptId,deptName},permissions:[]}`；admin/security 角色需 `smsCode`（演示：接口 `/api/auth/v1/sms-code` 返回验证码） |
+| GET | `/api/auth/v1/captcha` | 返回 `{captchaId,image,expiresIn,code?}`；`image` 为 PNG data URI，`code` 仅在 `share.auth.captcha.expose-code=true` 时回传（演示/联调） |
+| POST | `/api/auth/v1/login` | 入参 `{username,password,captchaId,captchaCode}`；返回 `{accessToken,refreshToken,expiresIn,user:{id,username,realName,roleCode,deptId,deptName},permissions:[]}`；验证码 2 分钟有效、用后作废 |
 | POST | `/api/auth/v1/refresh` | `{refreshToken}` → 新令牌 |
 | POST | `/api/auth/v1/logout` | 令牌失效（Redis 缺失时用内存黑名单即可） |
 | GET | `/api/auth/v1/profile` | 当前用户 + permissions + `menus`（前端菜单） |
@@ -244,8 +245,8 @@
 
 ## 3. 种子数据（各域自建，保证演示可点通）
 
-- 组织：市大数据局(1)、市税务局(2)、市市场监管局(3)、市人社局(4)、平台运维部(9)
-- 数据源（share-catalog）：`DS-TAX-MYSQL`（市税务局 MySQL，启用）、`DS-MARKET-PG`（PostgreSQL）、`DS-HRSS-FILE`（SFTP 文件）、`DS-GOV-KAFKA`（Kafka）、`DS-OPEN-HTTP`（HTTP 接口）
+- 组织：数据中心(1)、财务部(2)、运营管理部(3)、人力资源部(4)、平台运维部(9)
+- 数据源（share-catalog）：`DS-TAX-MYSQL`（财务部 MySQL，启用）、`DS-MARKET-PG`（PostgreSQL）、`DS-HRSS-FILE`（SFTP 文件）、`DS-BUS-KAFKA`（Kafka）、`DS-OPEN-HTTP`（HTTP 接口）
 - 目录资源（share-catalog）：企业基础信息、自然人基础信息、社保参保信息、市场主体登记信息、不动产登记信息、公共信用信息（含涉敏字段，level 3/4）
 - 任务（share-task）：企业基础信息全量同步、社保参保增量同步、信用信息定时归集（含历史实例与批次）
 - 共享 API（share-share）：企业基础信息查询、社保参保查询、信用信息查询（已上线）+ 凭据

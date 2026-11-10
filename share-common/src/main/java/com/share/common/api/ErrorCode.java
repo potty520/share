@@ -22,6 +22,8 @@ public enum ErrorCode {
     AUTH_ACCOUNT_DISABLED(41103, "账号已停用"),
     AUTH_MFA_REQUIRED(41104, "需要双因素认证"),
     AUTH_MFA_CODE_INVALID(41105, "动态验证码不正确"),
+    AUTH_CAPTCHA_REQUIRED(41106, "请输入图形验证码"),
+    AUTH_CAPTCHA_INVALID(41107, "图形验证码不正确或已过期，请刷新后重试"),
 
     // 目录
     CATALOG_NOT_FOUND(42101, "目录资源不存在"),

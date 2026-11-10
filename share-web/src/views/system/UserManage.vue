@@ -265,7 +265,7 @@
     <el-dialog v-model="deptVisible" :title="deptForm.id ? '编辑部门' : '新增部门'" width="480px" append-to-body>
       <el-form label-width="90px">
         <el-form-item label="部门名称" required>
-          <el-input v-model="deptForm.name" placeholder="如：市税务局" />
+          <el-input v-model="deptForm.name" placeholder="如：财务部" />
         </el-form-item>
         <el-form-item label="上级部门">
           <el-tree-select

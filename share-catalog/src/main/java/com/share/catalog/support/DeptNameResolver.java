@@ -24,10 +24,10 @@ public class DeptNameResolver {
     private static final Map<Long, String> FALLBACK = new LinkedHashMap<>();
 
     static {
-        FALLBACK.put(1L, "市大数据局");
-        FALLBACK.put(2L, "市税务局");
-        FALLBACK.put(3L, "市市场监管局");
-        FALLBACK.put(4L, "市人社局");
+        FALLBACK.put(1L, "数据中心");
+        FALLBACK.put(2L, "财务部");
+        FALLBACK.put(3L, "运营管理部");
+        FALLBACK.put(4L, "人力资源部");
         FALLBACK.put(9L, "平台运维部");
     }
 

@@ -194,7 +194,7 @@ public class OpsSeedDataRunner implements CommandLineRunner {
             saveAuditLog("provider", 2L, "PROVIDER", "datasource", "DATASOURCE_CREATE", "DATASOURCE", "1",
                     "SUCCESS", null, now.minusDays(2).withHour(10).withMinute(12).withSecond(31),
                     "10.10.2.21", "POST", "/api/datasource/v1/sources", 186,
-                    "{\"sourceName\":\"市税务局 MySQL\",\"sourceType\":\"MYSQL\",\"host\":\"10.10.2.15\"}");
+                    "{\"sourceName\":\"财务部 MySQL\",\"sourceType\":\"MYSQL\",\"host\":\"10.10.2.15\"}");
             saveAuditLog("bizadmin", 6L, "BIZ_ADMIN", "catalog", "CATALOG_PUBLISH", "CATALOG", "12",
                     "SUCCESS", null, now.minusDays(1).withHour(15).withMinute(40).withSecond(8),
                     "10.10.1.33", "POST", "/api/catalog/v1/resources/12/audit", 92,
@@ -254,7 +254,7 @@ public class OpsSeedDataRunner implements CommandLineRunner {
             LocalDateTime now = LocalDateTime.now();
             MonNode online = new MonNode();
             online.setNodeCode("EDGE-001");
-            online.setNodeName("市税务局前置节点");
+            online.setNodeName("财务部前置节点");
             online.setNodeType("EDGE");
             online.setIp("10.10.2.11");
             online.setPort(9443);
@@ -267,7 +267,7 @@ public class OpsSeedDataRunner implements CommandLineRunner {
             online.setVersion("1.0.0");
             online.setLastHeartbeat(now.minusSeconds(5));
             online.setDeptId(2L);
-            online.setNodeGroup("税务交换域");
+            online.setNodeGroup("财务交换域");
             online.setRunningTasks(1);
             online.setSimulated(true);
             online.setRemark("与 share-agent 种子节点一致（EDGE-001，在线）");
@@ -275,7 +275,7 @@ public class OpsSeedDataRunner implements CommandLineRunner {
 
             MonNode offline = new MonNode();
             offline.setNodeCode("EDGE-002");
-            offline.setNodeName("市人社局前置节点");
+            offline.setNodeName("人力资源部前置节点");
             offline.setNodeType("EDGE");
             offline.setIp("10.10.4.12");
             offline.setPort(9443);
@@ -288,7 +288,7 @@ public class OpsSeedDataRunner implements CommandLineRunner {
             offline.setVersion("1.0.0");
             offline.setLastHeartbeat(now.minusMinutes(20));
             offline.setDeptId(4L);
-            offline.setNodeGroup("人社交换域");
+            offline.setNodeGroup("人力资源交换域");
             offline.setRunningTasks(0);
             offline.setSimulated(false);
             offline.setRemark("与 share-agent 种子节点一致（EDGE-002，离线）");
@@ -352,7 +352,7 @@ public class OpsSeedDataRunner implements CommandLineRunner {
             p0.setAlarmLevel("P0");
             p0.setMetricValue(1.0);
             p0.setThresholdValue(1.0);
-            p0.setContent("前置节点 EDGE-002（市人社局前置节点）心跳超时已离线，最后心跳时间 "
+            p0.setContent("前置节点 EDGE-002（人力资源部前置节点）心跳超时已离线，最后心跳时间 "
                     + now.minusMinutes(20) + "，请检查节点网络与 Agent 进程状态。");
             p0.setStatus(OpsConstants.ALARM_OPEN);
             p0.setObjectType(OpsConstants.DIM_NODE);
@@ -425,7 +425,7 @@ public class OpsSeedDataRunner implements CommandLineRunner {
                     "APPROVAL", "AP20261109001", OpsConstants.MSG_CHANNEL_INNER, "INFO",
                     "/approval/todo", false, now.minusMinutes(25));
             saveMessage(1L, "admin 张管理", "[P0] 前置节点离线",
-                    "前置节点 EDGE-002（市人社局前置节点）心跳超时已离线，请立即检查网络与 Agent 进程。",
+                    "前置节点 EDGE-002（人力资源部前置节点）心跳超时已离线，请立即检查网络与 Agent 进程。",
                     "ALARM", "1", OpsConstants.MSG_CHANNEL_INNER, "ERROR",
                     "/monitor/alarms", false, now.minusMinutes(40));
             saveMessage(1L, "admin 张管理", "2 个调用凭据将在 7 天内到期",
@@ -492,12 +492,12 @@ public class OpsSeedDataRunner implements CommandLineRunner {
             channelRepository.save(webhook);
 
             Map<String, Object> emailConfig = new LinkedHashMap<>();
-            emailConfig.put("host", "smtp.example.gov.cn");
+            emailConfig.put("host", "smtp.example.internal");
             emailConfig.put("port", 465);
             emailConfig.put("username", "share-exchange");
             emailConfig.put("password", "change-me");
-            emailConfig.put("from", "share-exchange@example.gov.cn");
-            emailConfig.put("defaultTo", "ops@example.gov.cn");
+            emailConfig.put("from", "share-exchange@example.internal");
+            emailConfig.put("defaultTo", "ops@example.internal");
             emailConfig.put("ssl", true);
             NotifyChannel email = new NotifyChannel();
             email.setChannelCode("EMAIL-DEMO");
@@ -526,7 +526,7 @@ public class OpsSeedDataRunner implements CommandLineRunner {
             announcement.setContent("各部门：\n"
                     + "共享交换平台 V1.0 已完成部署并进入试运行阶段。即日起，数据共享申请、交换任务编排、"
                     + "共享服务调用等能力正式开放试用。\n"
-                    + "一、试运行范围：市大数据局、市税务局、市市场监管局、市人社局。\n"
+                    + "一、试运行范围：数据中心、财务部、运营管理部、人力资源部。\n"
                     + "二、请各数据提供方在 11 月 20 日前完成本部门数据目录编目与挂接。\n"
                     + "三、涉敏数据共享须经安全管理员审批，并默认开启脱敏策略。\n"
                     + "四、试运行期间如遇问题，请联系平台运维部（内线 8001）。\n"

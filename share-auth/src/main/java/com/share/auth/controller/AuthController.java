@@ -20,8 +20,8 @@ import org.springframework.web.bind.annotation.RestController;
 import java.util.Map;
 
 /**
- * 认证接口（FR-13）：登录 / 短信验证码 / 刷新 / 登出 / 个人中心 / 修改口令。
- * <p>login、sms-code、refresh 在 share-common 白名单内，无需令牌。</p>
+ * 认证接口（FR-13）：登录 / 图形验证码 / 刷新 / 登出 / 个人中心 / 修改口令。
+ * <p>login、captcha、refresh 在 share-common 白名单内，无需令牌。</p>
  */
 @RestController
 @RequestMapping("/api/auth/v1")
@@ -31,7 +31,7 @@ public class AuthController {
     private final AuthService authService;
     private final RedisSessionService redisSessionService;
 
-    /** 登录：ADMIN/SECURITY 角色需短信验证码（先调 /sms-code 获取）。 */
+    /** 登录：需先调用 GET /captcha 获取图形验证码。 */
     @PostMapping("/login")
     @AuditLog(action = "AUTH_LOGIN", targetType = "USER", recordArgs = false)
     public Result<LoginResponse.TokenResult> login(@Valid @RequestBody AuthRequests.LoginRequest request,
@@ -40,11 +40,10 @@ public class AuthController {
         return Result.ok(authService.login(request, clientIp));
     }
 
-    /** 生成短信验证码：演示环境将验证码直接放在 data.code 返回。 */
-    @PostMapping("/sms-code")
-    @AuditLog(action = "AUTH_SMS_CODE", targetType = "USER", recordArgs = false)
-    public Result<LoginResponse.SmsCodeResult> smsCode(@Valid @RequestBody AuthRequests.SmsCodeRequest request) {
-        return Result.ok(authService.sendSmsCode(request.username()));
+    /** 生成图形验证码：返回 captchaId 与 PNG data URI，前端直接展示。 */
+    @GetMapping("/captcha")
+    public Result<LoginResponse.CaptchaResult> captcha() {
+        return Result.ok(authService.captcha());
     }
 
     /** 刷新令牌：返回新的 access/refresh 令牌（旧 refresh 立即失效）。 */

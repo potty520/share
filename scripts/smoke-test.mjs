@@ -53,17 +53,21 @@ function expectCode(res, code = 0) {
 }
 
 async function login(username = 'admin', password = '123456') {
-  // 先尝试获取短信验证码（admin/security 需要双因素）
-  let smsCode
-  try {
-    const sms = await call('POST', '/api/auth/v1/sms-code', { body: { username }, useToken: false })
-    if (sms.code === 0 && sms.data) smsCode = sms.data.code || sms.data.smsCode
-  } catch (e) { /* ignore */ }
-  let res = await call('POST', '/api/auth/v1/login', {
-    body: { username, password, smsCode }, useToken: false
+  // 先获取图形验证码（演示/联调环境下接口会明文返回 code）
+  const cap = await call('GET', '/api/auth/v1/captcha', { useToken: false })
+  const captcha = cap.code === 0 ? (cap.data || {}) : {}
+  const res = await call('POST', '/api/auth/v1/login', {
+    body: {
+      username,
+      password,
+      captchaId: captcha.captchaId,
+      captchaCode: captcha.code
+    },
+    useToken: false
   })
-  if (res.code !== 0 && res.code === 41104) {
-    throw new Error('需要短信验证码，但自动获取失败：' + res.message)
+  if (res.code === 41106 || res.code === 41107) {
+    throw new Error('图形验证码校验失败，自动登录不可用：' + res.message
+      + (captcha.code ? '' : '（可设置 SHARE_CAPTCHA_EXPOSE_CODE=true 或 SHARE_CAPTCHA_ENABLED=false 后重试）'))
   }
   expectCode(res)
   assert(res.data && res.data.accessToken, '登录响应缺少 accessToken')
@@ -88,7 +92,7 @@ async function main() {
     return `version=${r.data.version}`
   })
 
-  await test('登录（admin，双因素）', async () => login('admin'))
+  await test('登录（admin，图形验证码）', async () => login('admin'))
 
   await test('获取当前用户 profile', async () => {
     const r = expectCode(await call('GET', '/api/auth/v1/profile'))
@@ -134,7 +138,7 @@ async function main() {
       body: {
         sourceCode: 'DS-SMOKE-' + ts, sourceName: '冒烟测试数据源', sourceType: 'MYSQL',
         host: '127.0.0.1', port: 3306, dbName: 'demo', username: 'demo', password: 'demo123',
-        deptId: 1, deptName: '市大数据局', secretLevel: 2, owner: 'admin', status: 'ENABLED'
+        deptId: 1, deptName: '数据中心', secretLevel: 2, owner: 'admin', status: 'ENABLED'
       }
     }))
     const id = create.data?.id || create.data

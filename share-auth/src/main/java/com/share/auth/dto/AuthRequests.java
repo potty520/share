@@ -8,14 +8,11 @@ public final class AuthRequests {
     private AuthRequests() {
     }
 
-    /** 登录入参：admin/security 角色必须携带 smsCode。 */
+    /** 登录入参：必须携带图形验证码（captchaId + captchaCode）。 */
     public record LoginRequest(@NotBlank(message = "用户名不能为空") String username,
                                @NotBlank(message = "密码不能为空") String password,
-                               String smsCode) {
-    }
-
-    /** 获取短信验证码入参（演示环境直接返回验证码）。 */
-    public record SmsCodeRequest(@NotBlank(message = "用户名不能为空") String username) {
+                               String captchaId,
+                               String captchaCode) {
     }
 
     /** 刷新令牌入参。 */

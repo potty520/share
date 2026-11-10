@@ -26,7 +26,7 @@ import java.util.Map;
 
 /**
  * 认证域种子数据（FR-13）：5 个部门、6 个角色、全部权限点、6 个演示账号 + 4 个普通用户。
- * <p>部门 id 与 {@link SeedConstants} 对齐（大数据局 1 / 税务局 2 / 市监局 3 / 人社局 4 / 平台运维部 9），
+ * <p>部门 id 与 {@link SeedConstants} 对齐（数据中心 1 / 财务部 2 / 运营管理部 3 / 人力资源部 4 / 平台运维部 9），
  * 采用原生 INSERT 固定主键后再重置自增序列，保证演示数据跨域引用一致。</p>
  */
 @Slf4j
@@ -74,11 +74,11 @@ public class AuthSeedRunner implements CommandLineRunner {
                 + " values (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)";
         LocalDateTime now = LocalDateTime.now();
         Object[][] rows = new Object[][]{
-                {1L, "市大数据局", "DEPT-DATA-BUREAU", 0L, 1, "周建国", "0571-88001001", "data@share.gov.cn", 1, "平台主管单位"},
-                {2L, "市税务局", "DEPT-TAX", 1L, 2, "李海峰", "0571-88002002", "tax@share.gov.cn", 1, "税务数据提供方"},
-                {3L, "市市场监管局", "DEPT-MARKET", 1L, 3, "王丽", "0571-88003003", "market@share.gov.cn", 1, "市场监管数据提供方"},
-                {4L, "市人社局", "DEPT-HRSS", 1L, 4, "赵晓东", "0571-88004004", "hrss@share.gov.cn", 1, "人社数据提供方"},
-                {9L, "平台运维部", "DEPT-PLATFORM", 1L, 9, "陈磊", "0571-88009009", "ops@share.gov.cn", 1, "平台运维与技术支撑"}
+                {1L, "数据中心", "DEPT-DATA-BUREAU", 0L, 1, "周建国", "0571-88001001", "data@share.local", 1, "平台主管单位"},
+                {2L, "财务部", "DEPT-TAX", 1L, 2, "李海峰", "0571-88002002", "tax@share.local", 1, "财务数据提供方"},
+                {3L, "运营管理部", "DEPT-MARKET", 1L, 3, "王丽", "0571-88003003", "market@share.local", 1, "市场运营数据提供方"},
+                {4L, "人力资源部", "DEPT-HRSS", 1L, 4, "赵晓东", "0571-88004004", "hrss@share.local", 1, "人力资源数据提供方"},
+                {9L, "平台运维部", "DEPT-PLATFORM", 1L, 9, "陈磊", "0571-88009009", "ops@share.local", 1, "平台运维与技术支撑"}
         };
         try {
             for (Object[] row : rows) {
@@ -154,7 +154,7 @@ public class AuthSeedRunner implements CommandLineRunner {
         log.info("初始化角色 {} 个、权限关联 {} 条", roles.size(), permissions.size());
     }
 
-    /** 6 个演示账号（口令 123456，admin/security 需短信码）+ 4 个普通用户。 */
+    /** 6 个演示账号（口令 123456，登录需图形验证码）+ 4 个普通用户。 */
     private void seedUsers() {
         if (userRepository.count() > 0) {
             return;
@@ -162,26 +162,26 @@ public class AuthSeedRunner implements CommandLineRunner {
         LocalDateTime now = LocalDateTime.now();
         // 顺序即主键：admin=1、provider=2、consumer=3、security=4、ops=5、bizadmin=6
         userRepository.save(buildUser("admin", "系统管理员", 1L, SeedConstants.ROLE_ADMIN, true,
-                "13800000001", "admin@share.gov.cn", now.minusHours(2), "平台内置超级管理员"));
-        userRepository.save(buildUser("provider", "市税务局数据专员", 2L, SeedConstants.ROLE_PROVIDER, false,
-                "13800000002", "provider@share.gov.cn", now.minusHours(5), "演示：数据提供方"));
-        userRepository.save(buildUser("consumer", "市市场监管局数据专员", 3L, SeedConstants.ROLE_CONSUMER, false,
-                "13800000003", "consumer@share.gov.cn", now.minusHours(8), "演示：数据使用方"));
+                "13800000001", "admin@share.local", now.minusHours(2), "平台内置超级管理员"));
+        userRepository.save(buildUser("provider", "财务部数据专员", 2L, SeedConstants.ROLE_PROVIDER, false,
+                "13800000002", "provider@share.local", now.minusHours(5), "演示：数据提供方"));
+        userRepository.save(buildUser("consumer", "运营管理部数据专员", 3L, SeedConstants.ROLE_CONSUMER, false,
+                "13800000003", "consumer@share.local", now.minusHours(8), "演示：数据使用方"));
         userRepository.save(buildUser("security", "安全管理员", 1L, SeedConstants.ROLE_SECURITY, true,
-                "13800000004", "security@share.gov.cn", now.minusHours(3), "演示：安全管理员，双因素登录"));
+                "13800000004", "security@share.local", now.minusHours(3), "演示：安全管理员"));
         userRepository.save(buildUser("ops", "平台交换运维员", 9L, SeedConstants.ROLE_OPS, false,
-                "13800000005", "ops@share.gov.cn", now.minusHours(6), "演示：交换运维"));
+                "13800000005", "ops@share.local", now.minusHours(6), "演示：交换运维"));
         userRepository.save(buildUser("bizadmin", "业务管理员", 1L, SeedConstants.ROLE_BIZ_ADMIN, false,
-                "13800000006", "bizadmin@share.gov.cn", now.minusHours(9), "演示：业务管理员"));
+                "13800000006", "bizadmin@share.local", now.minusHours(9), "演示：业务管理员"));
         // 4 个普通用户
         userRepository.save(buildUser("zhangwei", "张伟", 2L, SeedConstants.ROLE_CONSUMER, false,
-                "13900000007", "zhangwei@share.gov.cn", now.minusDays(1), "税务局业务人员"));
+                "13900000007", "zhangwei@share.local", now.minusDays(1), "财务部业务人员"));
         userRepository.save(buildUser("lina", "李娜", 3L, SeedConstants.ROLE_PROVIDER, false,
-                "13900000008", "lina@share.gov.cn", now.minusDays(2), "市监局业务人员"));
+                "13900000008", "lina@share.local", now.minusDays(2), "运营管理部业务人员"));
         userRepository.save(buildUser("wangqiang", "王强", 4L, SeedConstants.ROLE_CONSUMER, false,
-                "13900000009", "wangqiang@share.gov.cn", now.minusDays(3), "人社局业务人员"));
+                "13900000009", "wangqiang@share.local", now.minusDays(3), "人力资源部业务人员"));
         userRepository.save(buildUser("zhaomin", "赵敏", 2L, SeedConstants.ROLE_OPS, false,
-                "13900000010", "zhaomin@share.gov.cn", now.minusDays(4), "税务局运维人员"));
+                "13900000010", "zhaomin@share.local", now.minusDays(4), "财务部运维人员"));
         log.info("初始化演示账号 6 个 + 普通用户 4 个，初始口令 {}", SeedConstants.DEMO_PASSWORD);
     }
 

@@ -50,10 +50,10 @@ public class CatalogSeedRunner implements CommandLineRunner, Ordered {
 
     /** 演示部门（与 SeedConstants 一致，避免依赖 share-auth 模块） */
     private static final Map<Long, String> DEPTS = Map.of(
-            1L, "市大数据局",
-            2L, "市税务局",
-            3L, "市市场监管局",
-            4L, "市人社局",
+            1L, "数据中心",
+            2L, "财务部",
+            3L, "运营管理部",
+            4L, "人力资源部",
             9L, "平台运维部");
 
     private final DataSourceRepository sourceRepository;
@@ -144,26 +144,26 @@ public class CatalogSeedRunner implements CommandLineRunner, Ordered {
         if (sourceRepository.countByDeletedFalse() > 0) {
             return;
         }
-        saveSource("DS-TAX-MYSQL", "市税务局业务库(MySQL)", "MYSQL", "10.20.31.15", 3306, "taxdb",
+        saveSource("DS-TAX-MYSQL", "财务部业务库(MySQL)", "MYSQL", "10.20.31.15", 3306, "taxdb",
                 "tax_ro", "Tax@2026", null, null, 2L, "王建国", 3,
                 "{\"charset\":\"utf8mb4\",\"connectTimeout\":5000,\"useSSL\":false}",
                 "承载全市企业纳税申报、发票与纳税信用数据");
-        saveSource("DS-MARKET-PG", "市市场监管局登记库(PostgreSQL)", "POSTGRESQL", "10.20.32.21", 5432, "marketdb",
+        saveSource("DS-MARKET-PG", "运营管理部登记库(PostgreSQL)", "POSTGRESQL", "10.20.32.21", 5432, "marketdb",
                 "mkt_reader", "Mkt@2026", null, null, 3L, "李慧", 3,
                 "{\"schema\":\"public\",\"fetchSize\":1000}",
                 "市场主体登记、变更与年报数据");
-        saveSource("DS-HRSS-FILE", "市人社局社保文件交换区(SFTP)", "SFTP", "10.20.33.9", 22, null,
+        saveSource("DS-HRSS-FILE", "人力资源部社保文件交换区(SFTP)", "SFTP", "10.20.33.9", 22, null,
                 "hrss_sftp", "Hrss@2026", "/data/hrss/share", null, 4L, "张伟", 3,
                 "{\"authType\":\"password\",\"charset\":\"UTF-8\",\"passiveMode\":true}",
                 "社保参保、医保参保明细文件按日落地");
-        saveSource("DS-GOV-KAFKA", "市政务数据总线(Kafka)", "KAFKA", "10.20.30.8", 9092, "gov-data-bus",
-                "gov_client", "Kafka@2026", null, null, 1L, "陈晓", 3,
-                "{\"topic\":\"gov-data-bus\",\"groupId\":\"share-exchange\",\"securityProtocol\":\"SASL_PLAINTEXT\"}",
+        saveSource("DS-BUS-KAFKA", "数据总线(Kafka)", "KAFKA", "10.20.30.8", 9092, "data-bus",
+                "data_client", "Kafka@2026", null, null, 1L, "陈晓", 3,
+                "{\"topic\":\"data-bus\",\"groupId\":\"share-exchange\",\"securityProtocol\":\"SASL_PLAINTEXT\"}",
                 "跨部门实时数据交换消息总线");
         saveSource("DS-OPEN-HTTP", "市信用信息开放接口(HTTP)", "HTTP", "10.20.30.20", 8080, null,
                 "credit_client", "Open@2026", null, "http://10.20.30.20:8080/api/open/credit", 1L, "刘洋", 2,
                 "{\"method\":\"GET\",\"contentType\":\"application/json\",\"timeoutMs\":3000}",
-                "公共信用信息开放查询接口（红黑名单、信用评价）");
+                "公共信用信息开放查询接口（信用名单、信用评价）");
         log.info("[catalog] 已初始化 5 个演示数据源");
     }
 
@@ -231,19 +231,19 @@ public class CatalogSeedRunner implements CommandLineRunner, Ordered {
             return ids;
         }
         // 主题维度（6 个节点，含 2 个二级节点）
-        ids.put("SUB-GOV", saveClassify(null, "综合政务", "SUBJECT", "SUB-GOV", 10, "跨部门综合政务类数据资源"));
-        Long market = saveClassify(null, "市场监管", "SUBJECT", "SUB-MARKET", 20, "市场主体准入、监管类数据资源");
+        ids.put("SUB-BUS", saveClassify(null, "综合业务", "SUBJECT", "SUB-BUS", 10, "跨部门综合业务类数据资源"));
+        Long market = saveClassify(null, "市场运营", "SUBJECT", "SUB-MARKET", 20, "供应商与客户等市场主体数据资源");
         ids.put("SUB-MARKET", market);
         ids.put("SUB-MARKET-ENT", saveClassify(market, "企业登记", "SUBJECT", "SUB-MARKET-ENT", 21, "企业登记注册基础信息"));
-        Long live = saveClassify(null, "民生保障", "SUBJECT", "SUB-LIVE", 30, "社保、医保、公积金等民生类数据资源");
+        Long live = saveClassify(null, "员工保障", "SUBJECT", "SUB-LIVE", 30, "社保、医保、公积金等员工保障类数据资源");
         ids.put("SUB-LIVE", live);
         ids.put("SUB-LIVE-SOC", saveClassify(live, "社会保障", "SUBJECT", "SUB-LIVE-SOC", 31, "社会保险参保与待遇数据"));
-        ids.put("SUB-CREDIT", saveClassify(null, "信用体系", "SUBJECT", "SUB-CREDIT", 40, "公共信用与联合奖惩数据"));
+        ids.put("SUB-CREDIT", saveClassify(null, "信用体系", "SUBJECT", "SUB-CREDIT", 40, "公共信用与信用评价数据"));
         // 部门维度（4 个节点）
-        ids.put("DEPT-DATA", saveClassify(null, "市大数据局", "DEPT", "DEPT-DATA", 10, "平台与政务数据主管部门"));
-        ids.put("DEPT-TAX", saveClassify(null, "市税务局", "DEPT", "DEPT-TAX", 20, "税务数据提供方"));
-        ids.put("DEPT-MARKET", saveClassify(null, "市市场监管局", "DEPT", "DEPT-MARKET", 30, "市场主体数据提供方"));
-        ids.put("DEPT-HRSS", saveClassify(null, "市人社局", "DEPT", "DEPT-HRSS", 40, "人社与社保数据提供方"));
+        ids.put("DEPT-DATA", saveClassify(null, "数据中心", "DEPT", "DEPT-DATA", 10, "平台与数据主管部门"));
+        ids.put("DEPT-TAX", saveClassify(null, "财务部", "DEPT", "DEPT-TAX", 20, "财务数据提供方"));
+        ids.put("DEPT-MARKET", saveClassify(null, "运营管理部", "DEPT", "DEPT-MARKET", 30, "市场运营数据提供方"));
+        ids.put("DEPT-HRSS", saveClassify(null, "人力资源部", "DEPT", "DEPT-HRSS", 40, "人力资源与社保数据提供方"));
         log.info("[catalog] 已初始化分类树 {} 个节点", ids.size());
         return ids;
     }
@@ -277,8 +277,8 @@ public class CatalogSeedRunner implements CommandLineRunner, Ordered {
             CatalogResource entity = newCatalog("CAT-ENT-BASE", "企业基础信息",
                     "覆盖全市企业登记注册的基础信息，含统一社会信用代码、法定代表人、注册资本、注册地址等，支撑跨部门企业信息核验。",
                     classifyIds.get("SUB-MARKET-ENT"), 3L, "CONDITIONAL", 3, dsMarket, "POSTGRESQL",
-                    "cat_demo_enterprise", null, null, "每日", "市市场监管局数据资源处 0571-87654321",
-                    "企业,登记,法人", "市场监管总局共享目录标准对齐");
+                    "cat_demo_enterprise", null, null, "每日", "运营管理部数据资源处 0571-87654321",
+                    "企业,登记,法人", "行业共享目录标准对齐");
             entity = publishCatalog(entity, 2, now.minusDays(3));
             saveItems(entity.getId(), new Object[][]{
                     {"uscc", "VARCHAR(18)", "统一社会信用代码", "91330100MA2AB1CD3E", false, null},
@@ -302,7 +302,7 @@ public class CatalogSeedRunner implements CommandLineRunner, Ordered {
             CatalogResource entity = newCatalog("CAT-PERSON-BASE", "自然人基础信息",
                     "全市自然人基础信息，含姓名、身份证号、手机号、户籍地址等，仅限依法履职场景有条件共享。",
                     classifyIds.get("SUB-LIVE"), 1L, "CONDITIONAL", 4, dsTax, "MYSQL",
-                    "cat_demo_person", null, null, "每日", "市大数据局数据共享处 0571-88880001",
+                    "cat_demo_person", null, null, "每日", "数据中心数据共享处 0571-88880001",
                     "自然人,人口,基础信息", "涉及个人敏感信息，共享须经安全管理员审核");
             entity = publishCatalog(entity, 1, now.minusDays(20));
             saveItems(entity.getId(), new Object[][]{
@@ -322,10 +322,10 @@ public class CatalogSeedRunner implements CommandLineRunner, Ordered {
         // ---------- 3. 社保参保信息（已发布，文件类挂接） ----------
         try {
             CatalogResource entity = newCatalog("CAT-SOCIAL-INSUR", "社保参保信息",
-                    "企业职工社会保险参保明细，含参保险种、缴费基数与参保状态，按月归集，用于民生补贴与救助核验。",
+                    "企业职工社会保险参保明细，含参保险种、缴费基数与参保状态，按月归集，用于员工福利与待遇核验。",
                     classifyIds.get("SUB-LIVE-SOC"), 4L, "CONDITIONAL", 4, dsFile, "SFTP",
                     null, "/data/hrss/share/insured/insured_202611.csv", null, "每月",
-                    "市人社局信息中心 0571-87770002", "社保,参保,民生", "文件类挂接，按批次文件交换");
+                    "人力资源部信息中心 0571-87770002", "社保,参保,员工服务", "文件类挂接，按批次文件交换");
             entity = publishCatalog(entity, 1, now.minusDays(15));
             saveItems(entity.getId(), new Object[][]{
                     {"insured_name", "VARCHAR(32)", "参保人姓名", "王芳", true, "REPLACE_NAME"},
@@ -344,10 +344,10 @@ public class CatalogSeedRunner implements CommandLineRunner, Ordered {
         // ---------- 4. 市场主体登记信息（已发布，V1） ----------
         try {
             CatalogResource entity = newCatalog("CAT-MARKET-REG", "市场主体登记信息",
-                    "市场主体登记、变更、年报信息，含主体类型、登记机关、住所与法定代表人，用于营商环境分析与联合监管。",
+                    "市场主体登记、变更、年报信息，含主体类型、登记机构、住所与法定代表人，用于供应商与客户分析。",
                     classifyIds.get("SUB-MARKET"), 3L, "CONDITIONAL", 3, dsMarket, "POSTGRESQL",
-                    "cat_demo_market", null, null, "每日", "市市场监管局登记注册处 0571-87650009",
-                    "市场主体,登记,营商环境", "与市场监管总局登记标准保持一致");
+                    "cat_demo_market", null, null, "每日", "运营管理部登记注册处 0571-87650009",
+                    "市场主体,登记,市场运营", "与行业登记标准保持一致");
             entity = publishCatalog(entity, 1, now.minusDays(12));
             saveItems(entity.getId(), new Object[][]{
                     {"market_code", "VARCHAR(64)", "市场主体编码", "MKT202600001", false, null},
@@ -355,7 +355,7 @@ public class CatalogSeedRunner implements CommandLineRunner, Ordered {
                     {"market_type", "VARCHAR(32)", "主体类型", "有限责任公司", false, null},
                     {"legal_person", "VARCHAR(32)", "法定代表人", "陈昊", true, "REPLACE_NAME"},
                     {"reg_date", "DATE", "登记日期", "2019-03-12", false, null},
-                    {"reg_org", "VARCHAR(128)", "登记机关", "杭州市市场监督管理局", false, null},
+                    {"reg_org", "VARCHAR(128)", "登记机构", "杭州市市场监督管理局", false, null},
                     {"address", "VARCHAR(200)", "住所", "杭州市滨江区示例大道8号", true, "GENERALIZE_ADDR"},
                     {"contact_phone", "VARCHAR(20)", "联系电话", "13605710022", true, "MASK_PHONE"}
             });
@@ -368,8 +368,8 @@ public class CatalogSeedRunner implements CommandLineRunner, Ordered {
         try {
             CatalogResource entity = newCatalog("CAT-REALESTATE", "不动产登记信息",
                     "全市不动产登记结果信息，含不动产单元号、权利人、坐落地址与建筑面积，用于房产核验与政策测算。",
-                    classifyIds.get("SUB-GOV"), 1L, "CONDITIONAL", 4, dsMarket, "POSTGRESQL",
-                    "cat_demo_estate", null, null, "每日", "市大数据局数据汇聚组 0571-88880002",
+                    classifyIds.get("SUB-BUS"), 1L, "CONDITIONAL", 4, dsMarket, "POSTGRESQL",
+                    "cat_demo_estate", null, null, "每日", "数据中心数据汇聚组 0571-88880002",
                     "不动产,房产,登记", "权利人信息涉个人隐私，须脱敏后共享");
             entity = publishCatalog(entity, 1, now.minusDays(9));
             saveItems(entity.getId(), new Object[][]{
@@ -389,10 +389,10 @@ public class CatalogSeedRunner implements CommandLineRunner, Ordered {
         // ---------- 6. 公共信用信息（已发布，接口类挂接，无条件共享） ----------
         try {
             CatalogResource entity = newCatalog("CAT-CREDIT", "公共信用信息",
-                    "公共信用评价与红黑名单信息，含信用等级、守信与失信记录数，可无条件共享用于社会化应用。",
+                    "公共信用评价与信用名单信息，含信用等级、守信与失信记录数，可无条件共享用于社会化应用。",
                     classifyIds.get("SUB-CREDIT"), 1L, "UNCONDITIONAL", 3, dsHttp, "HTTP",
                     null, null, "http://10.20.30.20:8080/api/open/credit", "实时",
-                    "市大数据局信用中心 0571-88880003", "信用,红黑名单,信用评价", "接口类挂接，按 AppKey 授权调用");
+                    "数据中心信用中心 0571-88880003", "信用,信用名单,信用评价", "接口类挂接，按 AppKey 授权调用");
             entity = publishCatalog(entity, 1, now.minusDays(6));
             saveItems(entity.getId(), new Object[][]{
                     {"entity_name", "VARCHAR(128)", "信用主体名称", "杭州示例科技有限公司", false, null},
@@ -413,7 +413,7 @@ public class CatalogSeedRunner implements CommandLineRunner, Ordered {
             CatalogResource entity = newCatalog("CAT-TAX-CREDIT", "纳税信用评价信息",
                     "企业纳税信用年度评价结果，含信用等级与评价得分，用于金融授信与招投标信用核查。",
                     classifyIds.get("SUB-CREDIT"), 2L, "CONDITIONAL", 3, dsTax, "MYSQL",
-                    null, null, null, "每年", "市税务局纳税服务处 0571-87660001",
+                    null, null, null, "每年", "财务部纳税服务处 0571-87660001",
                     "纳税信用,信用评价", "待业务管理员审核");
             entity = submitCatalog(entity, now.minusDays(1));
             saveItems(entity.getId(), new Object[][]{
@@ -433,7 +433,7 @@ public class CatalogSeedRunner implements CommandLineRunner, Ordered {
                     "职工基本医疗保险参保与结算信息，用于医疗救助对象核验与费用监测。",
                     classifyIds.get("SUB-LIVE-SOC"), 4L, "CONDITIONAL", 4, dsFile, "SFTP",
                     null, "/data/hrss/share/medical/medical_202611.csv", null, "每月",
-                    "市人社局医保中心 0571-87770003", "医保,参保,民生", "含个人敏感信息，需安全管理员审批");
+                    "人力资源部医保中心 0571-87770003", "医保,参保,员工服务", "含个人敏感信息，需安全管理员审批");
             entity = submitCatalog(entity, now.minusHours(6));
             saveItems(entity.getId(), new Object[][]{
                     {"insured_name", "VARCHAR(32)", "参保人姓名", "孙丽", true, "REPLACE_NAME"},
@@ -451,7 +451,7 @@ public class CatalogSeedRunner implements CommandLineRunner, Ordered {
             CatalogResource entity = newCatalog("CAT-HOUSING-FUND", "住房公积金缴存信息",
                     "单位与职工住房公积金缴存、余额信息，用于住房保障资格核验。",
                     classifyIds.get("SUB-LIVE"), 4L, "CONDITIONAL", 3, null, null,
-                    null, null, null, "每月", "市公积金管理中心 0571-87000001",
+                    null, null, null, "每月", "人力资源部公积金组 0571-87000001",
                     "公积金,缴存,住房", "编目中，数据源待挂接");
             entity.setStatus("DRAFT");
             entity.setVersionNo(1);

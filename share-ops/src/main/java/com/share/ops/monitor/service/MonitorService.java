@@ -39,10 +39,10 @@ public class MonitorService {
 
     /** 演示环境组织名称映射（与种子数据/共享组织表保持一致） */
     private static final Map<Long, String> DEPT_NAMES = Map.of(
-            1L, "市大数据局",
-            2L, "市税务局",
-            3L, "市市场监管局",
-            4L, "市人社局",
+            1L, "数据中心",
+            2L, "财务部",
+            3L, "运营管理部",
+            4L, "人力资源部",
             9L, "平台运维部");
 
     private final MonNodeRepository nodeRepository;

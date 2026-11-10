@@ -24,8 +24,8 @@ export const useAuthStore = defineStore('auth', {
       this.applyAuth(res.data)
       return res.data
     },
-    async smsCode(username) {
-      const res = await request.post('/auth/v1/sms-code', { username })
+    async captcha() {
+      const res = await request.get('/auth/v1/captcha')
       return res.data
     },
     applyAuth(data) {

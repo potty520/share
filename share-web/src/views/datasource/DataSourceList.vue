@@ -104,7 +104,7 @@
         <el-row :gutter="12">
           <el-col :span="12">
             <el-form-item label="数据源名称" prop="sourceName">
-              <el-input v-model="form.sourceName" placeholder="如：市税务局 MySQL" maxlength="60" />
+              <el-input v-model="form.sourceName" placeholder="如：财务部 MySQL" maxlength="60" />
             </el-form-item>
           </el-col>
           <el-col :span="12">

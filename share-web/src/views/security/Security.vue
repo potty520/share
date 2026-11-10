@@ -194,7 +194,7 @@
     <el-dialog v-model="templateVisible" :title="templateForm.id ? '编辑模板' : '新增模板'" width="560px" append-to-body>
       <el-form ref="templateRef" :model="templateForm" :rules="templateRules" label-width="96px">
         <el-form-item label="模板名称" prop="templateName">
-          <el-input v-model="templateForm.templateName" placeholder="如：政务数据分类分级模板" />
+          <el-input v-model="templateForm.templateName" placeholder="如：数据分类分级模板" />
         </el-form-item>
         <el-form-item label="模板编码" prop="templateCode">
           <el-input v-model="templateForm.templateCode" placeholder="如：TPL-DEFAULT" :disabled="!!templateForm.id" />

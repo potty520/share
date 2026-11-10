@@ -99,6 +99,15 @@ share:
     password-min-length: 8
     # 敏感数据默认密级（4 级最高）
     sensitive-level: 3
+  auth:
+    captcha:
+      # 图形验证码开关；关闭后登录不再要求验证码（仅限自动化联调）
+      enabled: ${SHARE_CAPTCHA_ENABLED:true}
+      length: 4
+      ttl-seconds: 120
+      max-attempts: 5
+      # 演示环境把验证码明文随接口返回，便于脚本/联调；生产（mysql profile）已默认关闭
+      expose-code: ${SHARE_CAPTCHA_EXPOSE_CODE:true}
   monitor:
     heartbeat-timeout-seconds: 90
     audit-retention-days: 180

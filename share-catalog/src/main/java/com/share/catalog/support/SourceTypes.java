@@ -35,7 +35,7 @@ public final class SourceTypes {
     private static final List<SourceTypeDef> ALL = List.of(
             new SourceTypeDef("MYSQL", "MySQL", "DB", 3306, "com.mysql.cj.jdbc.Driver",
                     "jdbc:mysql://{host}:{port}/{dbName}?useUnicode=true&characterEncoding=utf8",
-                    true, false, "关系型数据库，市税务局业务库常用"),
+                    true, false, "关系型数据库，财务部业务库常用"),
             new SourceTypeDef("ORACLE", "Oracle", "DB", 1521, "oracle.jdbc.OracleDriver",
                     "jdbc:oracle:thin:@//{host}:{port}/{dbName}", true, false, "关系型数据库"),
             new SourceTypeDef("POSTGRESQL", "PostgreSQL", "DB", 5432, "org.postgresql.Driver",

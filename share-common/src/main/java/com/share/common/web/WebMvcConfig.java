@@ -22,7 +22,6 @@ public class WebMvcConfig implements WebMvcConfigurer {
                         "/api/auth/v1/login",
                         "/api/auth/v1/refresh",
                         "/api/auth/v1/captcha",
-                        "/api/auth/v1/sms-code",
                         "/api/agent/v1/register",
                         "/api/open/**",
                         "/api/health");

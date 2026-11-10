@@ -96,7 +96,7 @@ public class AuditService {
     /**
      * 按保留天数清理过期审计日志。
      * <p>mode=LOGICAL 逻辑删除（默认，可检索追溯）；ARCHIVE 先导出 CSV 归档再做物理删除；
-     * PHYSICAL 直接物理删除（满足等保对审计留存的物理清理要求）。</p>
+     * PHYSICAL 直接物理删除（满足审计留存合规的物理清理要求）。</p>
      */
     @Transactional
     public Map<String, Object> cleanupExpired(Integer days, String mode) {

@@ -28,7 +28,7 @@ import java.util.Locale;
 import java.util.Set;
 
 /**
- * 认证服务（FR-13）：登录（含双因素）、刷新、登出、个人中心、修改口令。
+ * 认证服务（FR-13）：登录（图形验证码）、刷新、登出、个人中心、修改口令。
  * <p>access 15 分钟 / refresh 7 天，JWT 由 share-common 的 {@link JwtTokenUtil} 签发。</p>
  */
 @Slf4j
@@ -40,13 +40,13 @@ public class AuthService {
     private final SysRoleRepository roleRepository;
     private final SysDeptRepository deptRepository;
     private final JwtTokenUtil jwtTokenUtil;
-    private final SmsCodeService smsCodeService;
+    private final CaptchaService captchaService;
     private final TokenBlacklistService blacklistService;
     private final RedisSessionService redisSessionService;
     private final RbacPermissionProvider permissionProvider;
     private final MenuService menuService;
 
-    /** 新口令最小长度（等保要求），取自平台配置 */
+    /** 新口令最小长度（安全合规要求），取自平台配置 */
     @Value("${share.security.password-min-length:8}")
     private int passwordMinLength;
 
@@ -54,10 +54,17 @@ public class AuthService {
     private static final long REFRESH_TTL_MILLIS = 7L * 24 * 3600 * 1000;
 
     /**
-     * 登录：校验口令 → 双因素（ADMIN/SECURITY 角色或开启 MFA 的账号需短信码）→ 签发令牌。
+     * 登录：校验图形验证码 → 校验口令 → 签发令牌。
      */
     @Transactional
     public LoginResponse.TokenResult login(AuthRequests.LoginRequest request, String clientIp) {
+        if (captchaService.enabled()
+                && (request.captchaCode() == null || request.captchaCode().isBlank())) {
+            throw new BizException(ErrorCode.AUTH_CAPTCHA_REQUIRED);
+        }
+        if (!captchaService.verify(request.captchaId(), request.captchaCode())) {
+            throw new BizException(ErrorCode.AUTH_CAPTCHA_INVALID);
+        }
         String username = request.username() == null ? "" : request.username().trim();
         SysUser user = userRepository.findByUsernameAndDeletedFalse(username)
                 .orElseThrow(() -> new BizException(ErrorCode.AUTH_BAD_CREDENTIALS));
@@ -69,15 +76,6 @@ public class AuthService {
             userRepository.save(user);
             throw new BizException(ErrorCode.AUTH_BAD_CREDENTIALS);
         }
-        if (requiresMfa(user)) {
-            String smsCode = request.smsCode();
-            if (smsCode == null || smsCode.isBlank()) {
-                throw new BizException(ErrorCode.AUTH_MFA_REQUIRED);
-            }
-            if (!smsCodeService.verify(user.getUsername(), smsCode)) {
-                throw new BizException(ErrorCode.AUTH_MFA_CODE_INVALID);
-            }
-        }
         user.setLastLoginTime(LocalDateTime.now());
         user.setLastLoginIp(clientIp);
         user.setLoginFailCount(0);
@@ -86,16 +84,11 @@ public class AuthService {
         return buildTokens(user, true, clientIp);
     }
 
-    /** 生成短信验证码（演示环境直接返回验证码）。 */
-    public LoginResponse.SmsCodeResult sendSmsCode(String username) {
-        SysUser user = userRepository.findByUsernameAndDeletedFalse(username == null ? "" : username.trim())
-                .orElseThrow(() -> new BizException(ErrorCode.NOT_FOUND, "用户不存在"));
-        if (Integer.valueOf(0).equals(user.getStatus())) {
-            throw new BizException(ErrorCode.AUTH_ACCOUNT_DISABLED);
-        }
-        String code = smsCodeService.generate(user.getUsername());
-        return new LoginResponse.SmsCodeResult(user.getUsername(), code, smsCodeService.expiresInSeconds(),
-                "演示环境验证码直接返回，有效期 5 分钟");
+    /** 生成图形验证码（图片随接口返回，前端直接展示）。 */
+    public LoginResponse.CaptchaResult captcha() {
+        CaptchaService.CaptchaChallenge challenge = captchaService.generate();
+        return new LoginResponse.CaptchaResult(challenge.captchaId(), challenge.image(),
+                challenge.code(), challenge.expiresIn());
     }
 
     /**
@@ -172,7 +165,7 @@ public class AuthService {
         log.info("用户修改口令: username={}", user.getUsername());
     }
 
-    /** 校验新口令强度（长度限制，满足基础等保要求）。 */
+    /** 校验新口令强度（长度限制，满足基础安全合规要求）。 */
     public void validateNewPassword(String newPassword) {
         if (newPassword == null || newPassword.isBlank()) {
             throw new BizException(ErrorCode.BAD_REQUEST, "新口令不能为空");
@@ -184,14 +177,6 @@ public class AuthService {
         if (newPassword.length() > 64) {
             throw new BizException(ErrorCode.BAD_REQUEST, "新口令长度不能大于 64 位");
         }
-    }
-
-    /** 是否需要双因素认证：ADMIN / SECURITY 角色或显式开启 MFA 的账号。 */
-    public boolean requiresMfa(SysUser user) {
-        String role = normalizeRole(user.getRoleCode());
-        return SeedConstants.ROLE_ADMIN.equals(role)
-                || SeedConstants.ROLE_SECURITY.equals(role)
-                || Boolean.TRUE.equals(user.getMfaEnabled());
     }
 
     /** 签发 access + refresh 令牌并组装返回体。 */

@@ -257,11 +257,11 @@ public class ShareSeedRunner implements CommandLineRunner {
         ShareApi enterprise = requireApi("ENTERPRISE_BASE_INFO");
         ShareApi hrss = requireApi("HRSS_INSURANCE_QUERY");
         // 演示凭据 1：企业基础信息，授权密级 3 >= 数据密级 2，返回明文
-        createCredential(enterprise, SeedConstants.CONSUMER_ID, "市市场监管局",
+        createCredential(enterprise, SeedConstants.CONSUMER_ID, "运营管理部",
                 "AKDEMOENT0001AB", "SKdemoEnterpriseSecret2026AAbbCC", 3, 180,
                 "演示凭据：企业基础信息查询（高授权密级，返回明文）");
         // 演示凭据 2：社保参保，授权密级 1 < 数据密级（涉敏），强制脱敏；5 天后到期用于 T-7 提醒演示
-        createCredential(hrss, SeedConstants.CONSUMER_ID, "市市场监管局",
+        createCredential(hrss, SeedConstants.CONSUMER_ID, "运营管理部",
                 "AKDEMOHRSS0002CD", "SKdemoHrssSecret2026CCddEEffGG", 1, 5,
                 "演示凭据：社保参保查询（低授权密级，动态脱敏 + 即将到期）");
     }
@@ -300,9 +300,9 @@ public class ShareSeedRunner implements CommandLineRunner {
 
         // 申请 A：涉敏（3 节点），已通过业务管理员，当前停在“数据提供方”节点
         ApprovalApply applyA = newApply("AP20261101093000101", credit, 3, true,
-                "用于市场主体信用联合奖惩核查", "市市场监管局信用监管处",
+                "用于市场主体信用评价核查", "运营管理部信用管理组",
                 "entName,creditCode,creditScore,creditLevel", "consumer",
-                SeedConstants.CONSUMER_ID, "市市场监管局");
+                SeedConstants.CONSUMER_ID, "运营管理部");
         List<ApprovalFlowNode> nodesA = createNodes(applyA, true);
         nodesA.get(0).setStatus(ShareConstants.NODE_APPROVED);
         nodesA.get(0).setApproverId(SeedConstants.BIZ_ADMIN_ID);
@@ -318,8 +318,8 @@ public class ShareSeedRunner implements CommandLineRunner {
 
         // 申请 B：非涉敏（2 节点），当前停在“业务管理员”节点
         ApprovalApply applyB = newApply("AP20261102093000102", enterprise, 2, false,
-                "用于企业基础信息核验比对", "市市场监管局登记注册处",
-                "entName,creditCode,legalPerson", "consumer", SeedConstants.CONSUMER_ID, "市市场监管局");
+                "用于企业基础信息核验比对", "运营管理部登记注册处",
+                "entName,creditCode,legalPerson", "consumer", SeedConstants.CONSUMER_ID, "运营管理部");
         List<ApprovalFlowNode> nodesB = createNodes(applyB, false);
         applyB.setCurrentNodeNo(1);
         applyB.setCurrentNodeName(nodesB.get(0).getNodeName());
@@ -330,7 +330,7 @@ public class ShareSeedRunner implements CommandLineRunner {
         // 申请 C：已驳回（留痕演示）
         ApprovalApply applyC = newApply("AP20261028093000103", credit, 3, true,
                 "用于信用数据批量导出分析", "外部商业机构",
-                "entName,creditCode,creditScore", "consumer", SeedConstants.CONSUMER_ID, "市市场监管局");
+                "entName,creditCode,creditScore", "consumer", SeedConstants.CONSUMER_ID, "运营管理部");
         List<ApprovalFlowNode> nodesC = createNodes(applyC, true);
         nodesC.get(0).setStatus(ShareConstants.NODE_REJECTED);
         nodesC.get(0).setApproverId(SeedConstants.BIZ_ADMIN_ID);
@@ -355,9 +355,9 @@ public class ShareSeedRunner implements CommandLineRunner {
         ShareApi api = requireApi("HRSS_INSURANCE_QUERY");
 
         ApprovalApply apply = newApply("AP20261015093000104", hrss, 4, true,
-                "用于社保参保情况核验（对外服务场景）", "市大数据局数据服务处",
+                "用于社保参保情况核验（对外服务场景）", "数据中心数据服务处",
                 "personName,insurType,insurMonth", "provider",
-                SeedConstants.PROVIDER_ID, "市人社局");
+                SeedConstants.PROVIDER_ID, "人力资源部");
         List<ApprovalFlowNode> nodes = new ArrayList<>();
         nodes.add(node(apply, 1, ShareConstants.NODE_TYPE_BIZ_ADMIN, "业务管理员审批",
                 ShareConstants.ROLE_BIZ_ADMIN, ShareConstants.NODE_APPROVED,

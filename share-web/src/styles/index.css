@@ -226,87 +226,198 @@ body,
 
 /* ---------- 登录页 ---------- */
 .login-page {
+  position: relative;
   min-height: 100vh;
   display: flex;
   align-items: center;
   justify-content: center;
-  background: radial-gradient(circle at 20% 20%, #2b3a6b 0%, #0f172a 55%, #0a1020 100%);
-  padding: 24px;
+  padding: 32px 24px;
+  overflow: hidden;
+  background:
+    radial-gradient(1100px 560px at 12% 8%, rgba(59, 130, 246, 0.55) 0%, transparent 60%),
+    radial-gradient(900px 520px at 88% 92%, rgba(79, 70, 229, 0.5) 0%, transparent 58%),
+    linear-gradient(140deg, #0b1226 0%, #101a3a 48%, #0a1122 100%);
+}
+
+.login-decoration {
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(70px);
+  opacity: 0.42;
+  pointer-events: none;
+}
+
+.dec-a {
+  width: 440px;
+  height: 440px;
+  top: -140px;
+  right: -90px;
+  background: #2563eb;
+}
+
+.dec-b {
+  width: 380px;
+  height: 380px;
+  bottom: -150px;
+  left: -70px;
+  background: #6366f1;
 }
 
 .login-card {
-  width: 940px;
+  position: relative;
+  width: 1040px;
   max-width: 96vw;
   display: grid;
-  grid-template-columns: 1.05fr 1fr;
+  grid-template-columns: 1.12fr 1fr;
   background: #fff;
-  border-radius: 14px;
+  border-radius: 20px;
   overflow: hidden;
-  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.35);
+  box-shadow: 0 30px 80px rgba(3, 10, 30, 0.5);
 }
 
 .login-brand {
-  background: linear-gradient(150deg, #3f51d1, #4a5ee5 55%, #6f86ff);
+  position: relative;
+  padding: 38px 40px 26px;
   color: #fff;
-  padding: 40px 36px;
   display: flex;
   flex-direction: column;
-  justify-content: space-between;
+  gap: 16px;
+  background:
+    radial-gradient(680px 360px at 18% 0%, rgba(99, 102, 241, 0.9) 0%, transparent 62%),
+    linear-gradient(150deg, #1e2a78 0%, #24418f 55%, #2563eb 100%);
+}
+
+.brand-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.38);
+  border-radius: 999px;
+  font-size: 11px;
+  letter-spacing: 0.18em;
+  color: rgba(255, 255, 255, 0.88);
 }
 
 .login-brand h1 {
-  font-size: 26px;
-  margin: 0 0 10px;
+  margin: 14px 0 8px;
+  font-size: 30px;
+  letter-spacing: 1px;
 }
 
-.login-brand p {
-  color: rgba(255, 255, 255, 0.82);
-  line-height: 1.8;
-  font-size: 13px;
+.login-hero {
+  width: 100%;
+  max-width: 520px;
+  align-self: center;
+  margin: 2px 0;
+  filter: drop-shadow(0 18px 34px rgba(6, 20, 60, 0.35));
 }
 
 .brand-points {
   list-style: none;
   padding: 0;
-  margin: 18px 0 0;
+  margin: 0;
   font-size: 13px;
-  color: rgba(255, 255, 255, 0.9);
+  color: rgba(255, 255, 255, 0.92);
   display: grid;
   gap: 8px;
 }
 
+.brand-points li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.brand-points li::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #7dd3fc;
+  box-shadow: 0 0 8px rgba(125, 211, 252, 0.9);
+  flex: none;
+}
+
 .login-form {
-  padding: 40px 40px 28px;
+  padding: 46px 44px 30px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
 }
 
 .login-form h2 {
   margin: 0 0 6px;
-  font-size: 20px;
+  font-size: 22px;
 }
 
-.demo-accounts {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 6px;
-  margin-top: 16px;
+.login-hint {
+  margin: 0 0 20px;
+  font-size: 13px;
+  color: #8a94a6;
 }
 
-.demo-account {
-  border: 1px solid var(--share-border);
-  border-radius: 6px;
-  padding: 6px 8px;
-  font-size: 12px;
+.login-submit {
+  width: 100%;
+  margin-top: 4px;
+}
+
+.captcha-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+}
+
+.captcha-row .el-input {
+  flex: 1;
+}
+
+.captcha-box {
+  width: 132px;
+  height: 44px;
+  padding: 0;
+  border: 1px solid #c7d2fe;
+  border-radius: 8px;
+  background: #eef2ff;
   cursor: pointer;
-  color: #4b5563;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.captcha-box:hover {
+  border-color: var(--share-primary);
+  box-shadow: 0 0 0 3px rgba(74, 94, 229, 0.12);
+}
+
+.captcha-box img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.captcha-placeholder {
+  font-size: 12px;
+  color: #6366f1;
+}
+
+.captcha-tip {
   display: flex;
   justify-content: space-between;
-  gap: 6px;
+  width: 100%;
+  margin-top: 6px;
+  font-size: 12px;
+  color: #94a3b8;
 }
 
-.demo-account:hover {
-  border-color: var(--share-primary);
+.captcha-tip a {
   color: var(--share-primary);
-  background: var(--share-primary-light);
+  cursor: pointer;
+  text-decoration: none;
 }
 
 /* ---------- 工作台 ---------- */
@@ -438,5 +549,9 @@ body,
 
   .login-brand {
     display: none;
+  }
+
+  .login-form {
+    padding: 36px 28px 24px;
   }
 }

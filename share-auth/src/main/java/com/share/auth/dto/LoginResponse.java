@@ -50,10 +50,10 @@ public final class LoginResponse {
                        List<Menu> children) {
     }
 
-    /** 短信验证码结果（演示环境返回 code 便于联调）。 */
-    public record SmsCodeResult(String username,
+    /** 图形验证码结果：image 为 PNG 的 data URI；expose-code 开启时附带明文便于联调。 */
+    public record CaptchaResult(String captchaId,
+                                String image,
                                 String code,
-                                int expiresIn,
-                                String tip) {
+                                int expiresIn) {
     }
 }

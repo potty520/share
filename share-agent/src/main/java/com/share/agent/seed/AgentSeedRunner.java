@@ -60,7 +60,7 @@ public class AgentSeedRunner implements CommandLineRunner {
         LocalDateTime now = LocalDateTime.now();
         AgNode online = new AgNode();
         online.setNodeCode("AG-NODE-2026001");
-        online.setNodeName("市税务局前置节点");
+        online.setNodeName("财务部前置节点");
         online.setIp("10.20.1.11");
         online.setPort(9527);
         online.setCapabilitiesJson(JsonUtil.toJson(List.of("TASK_RUN", "FILE_TRANSFER", "TASK_STOP")));
@@ -76,12 +76,12 @@ public class AgentSeedRunner implements CommandLineRunner {
         online.setLastHeartbeatTime(now.minusSeconds(12));
         online.setRegisterTime(now.minusDays(30));
         online.setTasksDone(28L);
-        online.setRemark("市税务局数据交换前置机");
+        online.setRemark("财务部数据交换前置机");
         online = nodeRepository.save(online);
 
         AgNode offline = new AgNode();
         offline.setNodeCode("AG-NODE-2026002");
-        offline.setNodeName("市人社局前置节点");
+        offline.setNodeName("人力资源部前置节点");
         offline.setIp("10.20.2.21");
         offline.setPort(9527);
         offline.setCapabilitiesJson(JsonUtil.toJson(List.of("TASK_RUN", "FILE_TRANSFER")));
@@ -97,7 +97,7 @@ public class AgentSeedRunner implements CommandLineRunner {
         offline.setLastHeartbeatTime(now.minusDays(2));
         offline.setRegisterTime(now.minusDays(45));
         offline.setTasksDone(16L);
-        offline.setRemark("市人社局数据交换前置机（维护中）");
+        offline.setRemark("人力资源部数据交换前置机（维护中）");
         nodeRepository.save(offline);
 
         // 在线节点最近 6 次心跳（30 秒间隔）
